@@ -10,6 +10,9 @@ const userSchema = new mongoose.Schema({
         type: String,
         required: true
     },
+    mobile: {
+        type: String
+    },
     role: {
         type: String,
         default: 'admin'
