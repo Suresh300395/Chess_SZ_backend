@@ -11,7 +11,13 @@ const playerSchema = new mongoose.Schema({
     arrivalTime: { type: String, required: true },
     departureDate: { type: String, required: true },
     departureTime: { type: String, required: true },
-    accommodation: { type: String, required: true }
+    accommodation: { type: String, required: true },
+    roomAllocation: {
+        building: { type: String },
+        floor: { type: String },
+        roomNumber: { type: String },
+        allocatedAt: { type: Date }
+    }
 });
 
 const coachSchema = new mongoose.Schema({
@@ -21,7 +27,13 @@ const coachSchema = new mongoose.Schema({
     mailId: { type: String, required: true },
     gender: { type: String, required: true },
     foodType: { type: String, required: true },
-    accommodation: { type: String, required: true }
+    accommodation: { type: String, required: true },
+    roomAllocation: {
+        building: { type: String },
+        floor: { type: String },
+        roomNumber: { type: String },
+        allocatedAt: { type: Date }
+    }
 });
 
 const registrationSchema = new mongoose.Schema({
