@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const Registration = require('../models/Registration');
+const User = require('../models/User');
+const { verifyToken, requireAdmin } = require('../Modules/authMiddleware');
+
 
 router.post('/', async (req, res) => {
     try {
@@ -15,6 +18,28 @@ router.post('/', async (req, res) => {
         });
 
         const savedRegistration = await newRegistration.save();
+
+        // Create user accounts for each player
+        for (const player of players) {
+            try {
+                // Check if user already exists to avoid duplicate key errors
+                const existingUser = await User.findOne({ username: player.mobileNo });
+                if (!existingUser) {
+                    await User.create({
+                        username: player.mobileNo,
+                        name: player.playerName,
+                        password: 'Aditya@123',
+                        mobile: player.mobileNo,
+                        role: 'player'
+                    });
+                } else if (!existingUser.name) {
+                    existingUser.name = player.playerName;
+                    await existingUser.save();
+                }
+            } catch (err) {
+                console.error(`Failed to create user for player ${player.mobileNo}:`, err);
+            }
+        }
         
         // Emit event for real-time update
         require('../socket').getIO().emit('dataUpdated');
@@ -26,7 +51,7 @@ router.post('/', async (req, res) => {
     }
 });
 
-router.get('/', async (req, res) => {
+router.get('/', verifyToken, requireAdmin, async (req, res) => {
     try {
         const registrations = await Registration.find().sort({ createdAt: -1 });
         res.status(200).json(registrations);
