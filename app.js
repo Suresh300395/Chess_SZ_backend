@@ -10,6 +10,7 @@ const authRoutes = require('./routes/auth');
 const registrationRoutes = require('./routes/registration');
 const committeeRoutes = require('./routes/committee');
 const blocksRoutes = require('./routes/blocks');
+const foodTokenRoutes = require('./routes/foodTokens');
 const authController = require('./controllers/authController');
 
 var app = express();
@@ -49,6 +50,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/registration', registrationRoutes);
 app.use('/api/committee', committeeRoutes);
 app.use('/api/blocks', blocksRoutes);
+app.use('/api/food-tokens', foodTokenRoutes);
 
 // Global error handler
 app.use((err, req, res, next) => {
