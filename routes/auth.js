@@ -5,6 +5,11 @@ const { verifyToken, requireAdmin, requireSuperAdmin } = require('../Modules/aut
 
 // Public routes
 router.post('/login', authController.login);
+router.post('/check-mobile', authController.checkMobile);
+
+// Protected: logged-in user dashboard
+router.get('/dashboard', verifyToken, authController.getDashboard);
+router.get('/accommodation-details', verifyToken, authController.getAccommodationDetails);
 
 // Protected: only superadmin can manage admins
 router.post('/register-admin', verifyToken, requireSuperAdmin, authController.registerAdmin);
