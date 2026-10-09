@@ -22,8 +22,36 @@ const userSchema = new mongoose.Schema({
     },
     role: {
         type: String,
-        enum: ['superadmin', 'admin', 'player'],
+        enum: ['superadmin', 'admin', 'player', 'coach'],
         default: 'admin'
+    },
+    registrationId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Registration',
+        index: true
+    },
+    participantId: {
+        type: mongoose.Schema.Types.ObjectId
+    },
+    participantType: {
+        type: String,
+        enum: ['player', 'coach']
+    },
+    accommodation: {
+        block: { type: String, default: '' },
+        roomNumber: { type: String, default: '' },
+        roomType: { type: String, default: '' },
+        status: { type: String, default: 'Not Allocated' }  // e.g. Allocated, Not Allocated
+    },
+    foodTokens: {
+        total: { type: Number, default: 0 },
+        used: { type: Number, default: 0 },
+        status: { type: String, default: 'Inactive' }       // Active, Inactive
+    },
+    cautionDeposit: {
+        amount: { type: Number, default: 0 },
+        paid: { type: Boolean, default: false },
+        refundStatus: { type: String, default: 'N/A' }      // Paid, Refund Pending, N/A
     }
 }, { timestamps: true });
 

@@ -9,6 +9,7 @@ const cors = require('cors');
 const authRoutes = require('./routes/auth');
 const registrationRoutes = require('./routes/registration');
 const committeeRoutes = require('./routes/committee');
+const blocksRoutes = require('./routes/blocks');
 const authController = require('./controllers/authController');
 
 var app = express();
@@ -47,6 +48,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api/auth', authRoutes);
 app.use('/api/registration', registrationRoutes);
 app.use('/api/committee', committeeRoutes);
+app.use('/api/blocks', blocksRoutes);
 
 // Global error handler
 app.use((err, req, res, next) => {
