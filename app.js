@@ -11,6 +11,8 @@ const registrationRoutes = require('./routes/registration');
 const committeeRoutes = require('./routes/committee');
 const blocksRoutes = require('./routes/blocks');
 const foodTokenRoutes = require('./routes/foodTokens');
+const routeMapRoutes = require('./routes/routeMap');
+const liveBoardRoutes = require('./routes/liveBoard');
 const authController = require('./controllers/authController');
 
 var app = express();
@@ -51,6 +53,8 @@ app.use('/api/registration', registrationRoutes);
 app.use('/api/committee', committeeRoutes);
 app.use('/api/blocks', blocksRoutes);
 app.use('/api/food-tokens', foodTokenRoutes);
+app.use('/api/route-map', routeMapRoutes);
+app.use('/api/live-board', liveBoardRoutes);
 
 // Global error handler
 app.use((err, req, res, next) => {

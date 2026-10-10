@@ -17,7 +17,8 @@ const playerSchema = new mongoose.Schema({
         floor: { type: String },
         roomNumber: { type: String },
         allocatedAt: { type: Date }
-    }
+    },
+    photo: { type: String, default: '' }
 });
 
 const coachSchema = new mongoose.Schema({
@@ -33,7 +34,8 @@ const coachSchema = new mongoose.Schema({
         floor: { type: String },
         roomNumber: { type: String },
         allocatedAt: { type: Date }
-    }
+    },
+    photo: { type: String, default: '' }
 });
 
 const registrationSchema = new mongoose.Schema({

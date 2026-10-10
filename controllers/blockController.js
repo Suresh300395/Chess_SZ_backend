@@ -74,3 +74,58 @@ exports.updateBlock = async (req, res) => {
         res.status(500).json({ message: 'Server Error', error: error.message });
     }
 };
+
+const HostelGuideline = require('../models/HostelGuideline');
+
+const DEFAULT_GUIDELINES = [
+    'Keep the room clean and maintain discipline.',
+    'Any damage to property will be charged.',
+    'Visitors are not allowed inside the hostel rooms.',
+    'Follow hostel timings strictly.',
+    'Report maintenance issues to the warden office.',
+    'Ragging is strictly prohibited.'
+];
+
+exports.getGuidelines = async (req, res) => {
+    try {
+        let doc = await HostelGuideline.findOne().sort({ updatedAt: -1 });
+        if (!doc) {
+            doc = await HostelGuideline.create({ points: DEFAULT_GUIDELINES });
+        }
+        res.status(200).json({ points: doc.points || DEFAULT_GUIDELINES });
+    } catch (error) {
+        console.error('Error fetching guidelines:', error);
+        res.status(500).json({ message: 'Server Error', error: error.message });
+    }
+};
+
+exports.updateGuidelines = async (req, res) => {
+    try {
+        const { points } = req.body;
+        if (!Array.isArray(points)) {
+            return res.status(400).json({ message: 'Points must be an array of strings' });
+        }
+
+        const cleanPoints = points.map(p => String(p).trim()).filter(Boolean);
+        let doc = await HostelGuideline.findOne().sort({ updatedAt: -1 });
+        if (doc) {
+            doc.points = cleanPoints;
+            await doc.save();
+        } else {
+            doc = await HostelGuideline.create({ points: cleanPoints });
+        }
+
+        try {
+            const socket = require('../socket');
+            socket.getIO().emit('accommodation_guidelines_updated', { points: doc.points });
+        } catch (e) {
+            // socket optional
+        }
+
+        res.status(200).json({ message: 'Guidelines updated successfully', points: doc.points });
+    } catch (error) {
+        console.error('Error updating guidelines:', error);
+        res.status(500).json({ message: 'Server Error', error: error.message });
+    }
+};
+

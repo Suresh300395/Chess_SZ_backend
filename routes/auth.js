@@ -9,7 +9,9 @@ router.post('/check-mobile', authController.checkMobile);
 
 // Protected: logged-in user dashboard
 router.get('/dashboard', verifyToken, authController.getDashboard);
+router.put('/profile-photo', verifyToken, authController.updateProfilePhoto);
 router.get('/accommodation-details', verifyToken, authController.getAccommodationDetails);
+router.get('/food-token-details', verifyToken, authController.getFoodTokenDetails);
 
 // Protected: only superadmin can manage admins
 router.post('/register-admin', verifyToken, requireSuperAdmin, authController.registerAdmin);
