@@ -24,6 +24,10 @@ const adminSchema = new mongoose.Schema({
         type: String,
         enum: ['superadmin', 'admin'],
         default: 'admin'
+    },
+    photo: {
+        type: String,
+        default: ''
     }
 }, { timestamps: true });
 

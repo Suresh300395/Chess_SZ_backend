@@ -39,6 +39,32 @@ router.get('/', async (req, res) => {
     }
 });
 
+// PUT route to update a committee member
+router.put('/:id', async (req, res) => {
+    try {
+        const updateData = { ...req.body };
+        if (updateData.order !== undefined) {
+            updateData.order = Number(updateData.order);
+        }
+        const updatedMember = await Committee.findByIdAndUpdate(
+            req.params.id,
+            updateData,
+            { new: true }
+        );
+        
+        if (!updatedMember) {
+            return res.status(404).json({ error: 'Member not found' });
+        }
+        
+        require('../socket').getIO().emit('committeeUpdated');
+        
+        res.status(200).json({ message: 'Committee member updated successfully', member: updatedMember });
+    } catch (error) {
+        console.error('Error updating committee member:', error);
+        res.status(500).json({ error: 'Failed to update committee member' });
+    }
+});
+
 // PUT route to update order of a committee member
 router.put('/:id/order', async (req, res) => {
     try {

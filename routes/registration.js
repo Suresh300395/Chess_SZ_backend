@@ -149,32 +149,98 @@ router.post('/', async (req, res) => {
 
         const savedRegistration = await newRegistration.save();
 
-        // Create user accounts for each player
-        for (const player of players) {
-            try {
-                // Check if user already exists to avoid duplicate key errors
-                const existingUser = await User.findOne({ username: player.mobileNo });
-                if (!existingUser) {
-                    await User.create({
-                        username: player.mobileNo,
-                        name: player.playerName,
-                        password: 'Aditya@123',
-                        mobile: player.mobileNo,
-                        role: 'player'
-                    });
-                } else if (!existingUser.name) {
-                    existingUser.name = player.playerName;
-                    await existingUser.save();
+        let accountsCreated = 0;
+
+        // 1. Create or update user accounts for each player
+        if (Array.isArray(savedRegistration.players)) {
+            for (const player of savedRegistration.players) {
+                try {
+                    const mobile = String(player.mobileNo).trim();
+                    let existingUser = await User.findOne({ username: mobile });
+
+                    if (!existingUser) {
+                        await User.create({
+                            username: mobile,
+                            name: player.playerName,
+                            password: 'Aditya@123',
+                            mobile: mobile,
+                            role: 'player',
+                            registrationId: savedRegistration._id,
+                            participantId: player._id,
+                            participantType: 'player'
+                        });
+                        accountsCreated++;
+                    } else {
+                        existingUser.name = player.playerName || existingUser.name;
+                        existingUser.role = 'player';
+                        existingUser.registrationId = savedRegistration._id;
+                        existingUser.participantId = player._id;
+                        existingUser.participantType = 'player';
+                        await existingUser.save();
+                        accountsCreated++;
+                    }
+                } catch (err) {
+                    console.error(`Failed to create user for player ${player.mobileNo}:`, err);
                 }
-            } catch (err) {
-                console.error(`Failed to create user for player ${player.mobileNo}:`, err);
+            }
+        }
+
+        // 2. Create or update user accounts for each coach/manager
+        if (Array.isArray(savedRegistration.coaches)) {
+            for (const coach of savedRegistration.coaches) {
+                try {
+                    const mobile = String(coach.mobileNo).trim();
+                    let existingUser = await User.findOne({ username: mobile });
+
+                    if (!existingUser) {
+                        await User.create({
+                            username: mobile,
+                            name: coach.name,
+                            password: 'Aditya@123',
+                            mobile: mobile,
+                            role: 'coach',
+                            registrationId: savedRegistration._id,
+                            participantId: coach._id,
+                            participantType: 'coach'
+                        });
+                        accountsCreated++;
+                    } else {
+                        existingUser.name = coach.name || existingUser.name;
+                        existingUser.role = 'coach';
+                        existingUser.registrationId = savedRegistration._id;
+                        existingUser.participantId = coach._id;
+                        existingUser.participantType = 'coach';
+                        await existingUser.save();
+                        accountsCreated++;
+                    }
+                } catch (err) {
+                    console.error(`Failed to create user for coach ${coach.mobileNo}:`, err);
+                }
             }
         }
         
         // Emit event for real-time update
         require('../socket').getIO().emit('dataUpdated');
 
-        res.status(201).json({ message: 'Registration successful', data: savedRegistration });
+        const firstPlayer = savedRegistration.players?.[0];
+        const firstCoach = savedRegistration.coaches?.[0];
+        const sampleMember = firstPlayer || firstCoach;
+
+        res.status(201).json({
+            message: 'Registration successful',
+            data: savedRegistration,
+            summary: {
+                totalPlayers: savedRegistration.players?.length || 0,
+                totalCoaches: savedRegistration.coaches?.length || 0,
+                accountsCreated,
+                sampleCredentials: {
+                    name: sampleMember ? (sampleMember.playerName || sampleMember.name) : '',
+                    mobile: sampleMember ? sampleMember.mobileNo : '',
+                    password: 'Aditya@123',
+                    role: firstPlayer ? 'player' : 'coach'
+                }
+            }
+        });
     } catch (error) {
         console.error('Registration Error:', error);
         res.status(500).json({ message: 'Server error during registration', error: error.message });

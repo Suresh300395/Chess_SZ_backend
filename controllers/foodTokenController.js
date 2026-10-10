@@ -320,15 +320,28 @@ exports.issueToken = async (req, res) => {
  */
 exports.issueBulk = async (req, res) => {
     try {
-        const { registrationId, mealType } = req.body;
-        const mealDate = (req.body.mealDate || getTodayString()).trim();
+        const { registrationId, mealType, selections } = req.body;
+        const fallbackDate = (req.body.mealDate || getTodayString()).trim();
 
-        if (!registrationId || !mealType) {
-            return res.status(400).json({ message: 'registrationId and mealType are required' });
+        if (!registrationId) {
+            return res.status(400).json({ message: 'registrationId is required' });
         }
 
-        if (!MEAL_TYPES.includes(mealType)) {
-            return res.status(400).json({ message: `Invalid mealType. Allowed: ${MEAL_TYPES.join(', ')}` });
+        let targetItems = [];
+        if (Array.isArray(selections) && selections.length > 0) {
+            targetItems = selections.filter(s => s && s.mealType && MEAL_TYPES.includes(s.mealType)).map(s => ({
+                mealType: s.mealType,
+                mealDate: (s.mealDate || fallbackDate).trim()
+            }));
+        } else if (mealType && MEAL_TYPES.includes(mealType)) {
+            targetItems = [{
+                mealType,
+                mealDate: fallbackDate
+            }];
+        }
+
+        if (targetItems.length === 0) {
+            return res.status(400).json({ message: 'Valid mealType or selections array is required' });
         }
 
         const reg = await Registration.findById(registrationId).lean();
@@ -365,72 +378,80 @@ exports.issueBulk = async (req, res) => {
             return res.status(400).json({ message: 'No participants found in this team' });
         }
 
-        // Find existing tokens for this group
-        const existingTokens = await FoodToken.find({
-            personRef: { $in: participants.map(p => p.personRef) },
-            mealType,
-            mealDate
-        }).lean();
-
-        const existingRefMap = new Set(existingTokens.map(t => t.personRef.toString()));
-
         const newlyIssued = [];
         const printPayloads = [];
+        let totalSkipped = 0;
 
-        for (const person of participants) {
-            if (existingRefMap.has(person.personRef.toString())) {
-                continue; // Skip already issued
-            }
+        for (const item of targetItems) {
+            const currentMeal = item.mealType;
+            const currentDate = item.mealDate;
 
-            let codeCreated = false;
-            let attempts = 0;
-            while (!codeCreated && attempts < 5) {
-                attempts++;
-                const code = generateSecureCode(10);
-                try {
-                    const token = await FoodToken.create({
-                        code,
-                        personType: person.personType,
-                        personRef: person.personRef,
-                        personTypeModel: 'Registration',
-                        name: person.name,
-                        identifier: person.identifier,
-                        teamOrSport: reg.universityName,
-                        block: person.block,
-                        room: person.room,
-                        eventName: EVENT_NAME,
-                        mealType,
-                        mealDate,
-                        status: 'ISSUED',
-                        issuedBy: req.user?.username || 'admin',
-                        issuedAt: new Date(),
-                        printCount: 1,
-                        lastPrintedAt: new Date(),
-                        auditLog: [{
-                            action: 'ISSUE',
-                            performedBy: req.user?.username || 'admin',
-                            timestamp: new Date(),
-                            details: `Bulk issue for ${reg.universityName}`
-                        }]
-                    });
+            // Find existing tokens for this group for this specific meal and date
+            const existingTokens = await FoodToken.find({
+                personRef: { $in: participants.map(p => p.personRef) },
+                mealType: currentMeal,
+                mealDate: currentDate,
+                status: { $ne: 'CANCELLED' }
+            }).lean();
 
-                    newlyIssued.push(token);
-                    printPayloads.push({
-                        code: token.code,
-                        name: token.name,
-                        identifier: token.identifier,
-                        teamOrSport: token.teamOrSport,
-                        block: token.block,
-                        room: token.room,
-                        eventName: token.eventName,
-                        mealType: token.mealType,
-                        mealDate: token.mealDate,
-                        issuedAt: token.issuedAt
-                    });
-                    codeCreated = true;
-                } catch (err) {
-                    if (err.code === 11000 && err.keyPattern?.code) continue;
-                    break;
+            const existingRefMap = new Set(existingTokens.map(t => t.personRef.toString()));
+
+            for (const person of participants) {
+                if (existingRefMap.has(person.personRef.toString())) {
+                    totalSkipped++;
+                    continue; // Skip already issued
+                }
+
+                let codeCreated = false;
+                let attempts = 0;
+                while (!codeCreated && attempts < 5) {
+                    attempts++;
+                    const code = generateSecureCode(10);
+                    try {
+                        const token = await FoodToken.create({
+                            code,
+                            personType: person.personType,
+                            personRef: person.personRef,
+                            personTypeModel: 'Registration',
+                            name: person.name,
+                            identifier: person.identifier,
+                            teamOrSport: reg.universityName,
+                            block: person.block,
+                            room: person.room,
+                            eventName: EVENT_NAME,
+                            mealType: currentMeal,
+                            mealDate: currentDate,
+                            status: 'ISSUED',
+                            issuedBy: req.user?.username || 'admin',
+                            issuedAt: new Date(),
+                            printCount: 1,
+                            lastPrintedAt: new Date(),
+                            auditLog: [{
+                                action: 'ISSUE',
+                                performedBy: req.user?.username || 'admin',
+                                timestamp: new Date(),
+                                details: `Bulk team issue for ${reg.universityName} (${currentDate} ${currentMeal})`
+                            }]
+                        });
+
+                        newlyIssued.push(token);
+                        printPayloads.push({
+                            code: token.code,
+                            name: token.name,
+                            identifier: token.identifier,
+                            teamOrSport: token.teamOrSport,
+                            block: token.block,
+                            room: token.room,
+                            eventName: token.eventName,
+                            mealType: token.mealType,
+                            mealDate: token.mealDate,
+                            issuedAt: token.issuedAt
+                        });
+                        codeCreated = true;
+                    } catch (err) {
+                        if (err.code === 11000 && err.keyPattern?.code) continue;
+                        break;
+                    }
                 }
             }
         }
@@ -440,9 +461,9 @@ exports.issueBulk = async (req, res) => {
         }
 
         res.status(200).json({
-            message: `Issued ${newlyIssued.length} tokens (${participants.length - newlyIssued.length} already existed)`,
+            message: `Issued ${newlyIssued.length} tokens for team (${totalSkipped} already existed)`,
             issuedCount: newlyIssued.length,
-            skippedCount: participants.length - newlyIssued.length,
+            skippedCount: totalSkipped,
             totalTeamMembers: participants.length,
             printPayloads
         });
@@ -774,10 +795,16 @@ exports.getTokens = async (req, res) => {
  */
 exports.getStats = async (req, res) => {
     try {
-        const mealDate = getTodayString();
+        const { mealDate } = req.query;
+
+        // If a mealDate is specified in query, filter by it; otherwise aggregate across all tokens
+        const matchStage = {};
+        if (mealDate) {
+            matchStage.mealDate = mealDate;
+        }
 
         const statsAgg = await FoodToken.aggregate([
-            { $match: { mealDate } },
+            ...(Object.keys(matchStage).length > 0 ? [{ $match: matchStage }] : []),
             {
                 $group: {
                     _id: { mealType: '$mealType', status: '$status' },

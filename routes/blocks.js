@@ -1,6 +1,16 @@
 const express = require('express');
 const router = express.Router();
-const { addBlock, getBlocks, deleteBlock, updateBlock } = require('../controllers/blockController');
+const { 
+    addBlock, 
+    getBlocks, 
+    deleteBlock, 
+    updateBlock,
+    getGuidelines,
+    updateGuidelines
+} = require('../controllers/blockController');
+
+router.get('/guidelines', getGuidelines);
+router.put('/guidelines', updateGuidelines);
 
 router.post('/', addBlock);
 router.get('/', getBlocks);
