@@ -97,8 +97,8 @@ exports.getPeople = async (req, res) => {
             }
         }
 
-        // Limit results to 50 for performance
-        const limitedPeople = people.slice(0, 50);
+        // Limit results to 200 for performance (allows full contingent results for university searches)
+        const limitedPeople = people.slice(0, 200);
 
         // Fetch ALL existing active tokens for these people across their entire stay
         const personRefs = limitedPeople.map(p => p.personRef);
@@ -315,16 +315,16 @@ exports.issueToken = async (req, res) => {
 };
 
 /**
- * 3. Issue Bulk Tokens (for whole team/registration)
+ * 3. Issue Bulk Tokens (for whole team/university or selected participants)
  * POST /api/food-tokens/issue-bulk
  */
 exports.issueBulk = async (req, res) => {
     try {
-        const { registrationId, mealType, selections } = req.body;
+        const { registrationId, personRefs, universityName, mealType, selections } = req.body;
         const fallbackDate = (req.body.mealDate || getTodayString()).trim();
 
-        if (!registrationId) {
-            return res.status(400).json({ message: 'registrationId is required' });
+        if (!registrationId && (!Array.isArray(personRefs) || personRefs.length === 0) && !universityName) {
+            return res.status(400).json({ message: 'registrationId, personRefs, or universityName is required' });
         }
 
         let targetItems = [];
@@ -344,38 +344,127 @@ exports.issueBulk = async (req, res) => {
             return res.status(400).json({ message: 'Valid mealType or selections array is required' });
         }
 
-        const reg = await Registration.findById(registrationId).lean();
-        if (!reg) {
-            return res.status(404).json({ message: 'Registration not found' });
-        }
-
         const participants = [];
-        if (Array.isArray(reg.players)) {
-            reg.players.forEach(p => participants.push({
-                personType: 'PLAYER',
-                personRef: p._id,
-                name: p.playerName,
-                identifier: p.mobileNo,
-                block: p.roomAllocation?.building || '',
-                room: p.roomAllocation?.roomNumber || ''
-            }));
-        }
-        if (Array.isArray(reg.coaches)) {
-            reg.coaches.forEach(c => {
-                const isManager = (c.role || '').toUpperCase().includes('MANAGER');
-                participants.push({
-                    personType: isManager ? 'MANAGER' : 'COACH',
-                    personRef: c._id,
-                    name: c.name,
-                    identifier: c.mobileNo,
-                    block: c.roomAllocation?.building || '',
-                    room: c.roomAllocation?.roomNumber || ''
+
+        // 1. If specific personRefs are passed (multi-selection)
+        if (Array.isArray(personRefs) && personRefs.length > 0) {
+            const requestedRefs = new Set(personRefs.map(r => r.toString()));
+            const registrations = await Registration.find({
+                $or: [
+                    { 'players._id': { $in: personRefs } },
+                    { 'coaches._id': { $in: personRefs } }
+                ]
+            }).lean();
+
+            for (const reg of registrations) {
+                if (Array.isArray(reg.players)) {
+                    for (const p of reg.players) {
+                        if (requestedRefs.has(p._id.toString())) {
+                            participants.push({
+                                personType: 'PLAYER',
+                                personRef: p._id,
+                                registrationId: reg._id,
+                                name: p.playerName,
+                                identifier: p.mobileNo,
+                                teamOrSport: reg.universityName,
+                                block: p.roomAllocation?.building || '',
+                                room: p.roomAllocation?.roomNumber || ''
+                            });
+                        }
+                    }
+                }
+                if (Array.isArray(reg.coaches)) {
+                    for (const c of reg.coaches) {
+                        if (requestedRefs.has(c._id.toString())) {
+                            const isManager = (c.role || '').toUpperCase().includes('MANAGER');
+                            participants.push({
+                                personType: isManager ? 'MANAGER' : 'COACH',
+                                personRef: c._id,
+                                registrationId: reg._id,
+                                name: c.name,
+                                identifier: c.mobileNo,
+                                teamOrSport: reg.universityName,
+                                block: c.roomAllocation?.building || '',
+                                room: c.roomAllocation?.roomNumber || ''
+                            });
+                        }
+                    }
+                }
+            }
+        } else if (registrationId) {
+            // 2. Existing registrationId based flow
+            const reg = await Registration.findById(registrationId).lean();
+            if (!reg) {
+                return res.status(404).json({ message: 'Registration not found' });
+            }
+
+            if (Array.isArray(reg.players)) {
+                reg.players.forEach(p => participants.push({
+                    personType: 'PLAYER',
+                    personRef: p._id,
+                    registrationId: reg._id,
+                    name: p.playerName,
+                    identifier: p.mobileNo,
+                    teamOrSport: reg.universityName,
+                    block: p.roomAllocation?.building || '',
+                    room: p.roomAllocation?.roomNumber || ''
+                }));
+            }
+            if (Array.isArray(reg.coaches)) {
+                reg.coaches.forEach(c => {
+                    const isManager = (c.role || '').toUpperCase().includes('MANAGER');
+                    participants.push({
+                        personType: isManager ? 'MANAGER' : 'COACH',
+                        personRef: c._id,
+                        registrationId: reg._id,
+                        name: c.name,
+                        identifier: c.mobileNo,
+                        teamOrSport: reg.universityName,
+                        block: c.roomAllocation?.building || '',
+                        room: c.roomAllocation?.roomNumber || ''
+                    });
                 });
-            });
+            }
+        } else if (universityName) {
+            // 3. All people from a specific university
+            const trimmedUniv = universityName.trim();
+            const registrations = await Registration.find({
+                universityName: new RegExp('^' + trimmedUniv.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i')
+            }).lean();
+
+            for (const reg of registrations) {
+                if (Array.isArray(reg.players)) {
+                    reg.players.forEach(p => participants.push({
+                        personType: 'PLAYER',
+                        personRef: p._id,
+                        registrationId: reg._id,
+                        name: p.playerName,
+                        identifier: p.mobileNo,
+                        teamOrSport: reg.universityName,
+                        block: p.roomAllocation?.building || '',
+                        room: p.roomAllocation?.roomNumber || ''
+                    }));
+                }
+                if (Array.isArray(reg.coaches)) {
+                    reg.coaches.forEach(c => {
+                        const isManager = (c.role || '').toUpperCase().includes('MANAGER');
+                        participants.push({
+                            personType: isManager ? 'MANAGER' : 'COACH',
+                            personRef: c._id,
+                            registrationId: reg._id,
+                            name: c.name,
+                            identifier: c.mobileNo,
+                            teamOrSport: reg.universityName,
+                            block: c.roomAllocation?.building || '',
+                            room: c.roomAllocation?.roomNumber || ''
+                        });
+                    });
+                }
+            }
         }
 
         if (participants.length === 0) {
-            return res.status(400).json({ message: 'No participants found in this team' });
+            return res.status(400).json({ message: 'No participants found to issue tokens' });
         }
 
         const newlyIssued = [];
@@ -415,7 +504,7 @@ exports.issueBulk = async (req, res) => {
                             personTypeModel: 'Registration',
                             name: person.name,
                             identifier: person.identifier,
-                            teamOrSport: reg.universityName,
+                            teamOrSport: person.teamOrSport,
                             block: person.block,
                             room: person.room,
                             eventName: EVENT_NAME,
@@ -430,7 +519,7 @@ exports.issueBulk = async (req, res) => {
                                 action: 'ISSUE',
                                 performedBy: req.user?.username || 'admin',
                                 timestamp: new Date(),
-                                details: `Bulk team issue for ${reg.universityName} (${currentDate} ${currentMeal})`
+                                details: `Bulk issue for ${person.teamOrSport} (${currentDate} ${currentMeal})`
                             }]
                         });
 
@@ -461,7 +550,7 @@ exports.issueBulk = async (req, res) => {
         }
 
         res.status(200).json({
-            message: `Issued ${newlyIssued.length} tokens for team (${totalSkipped} already existed)`,
+            message: `Issued ${newlyIssued.length} tokens for ${participants.length} participant(s) (${totalSkipped} already existed)`,
             issuedCount: newlyIssued.length,
             skippedCount: totalSkipped,
             totalTeamMembers: participants.length,
