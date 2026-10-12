@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const Admin = require('../models/Admin');
 const HostelBlock = require('../models/HostelBlock');
+const { isMealTokenExpired } = require('../config/mealConfig');
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const path = require('path');
@@ -103,12 +104,12 @@ exports.checkMobile = async (req, res) => {
 exports.getDashboard = async (req, res) => {
     try {
         const Registration = require('../models/Registration');
-        
+
         const user = await User.findById(req.user.id).select('-password -__v');
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }
-        
+
         let mappedAcc = {
             block: '',
             roomNumber: '',
@@ -129,8 +130,8 @@ exports.getDashboard = async (req, res) => {
                 participant = arr.find(p => p._id.toString() === user.participantId.toString());
                 pType = user.participantType;
             }
-        } 
-        
+        }
+
         // 2. Fallback: search by mobile if not explicitly linked (backfill strategy)
         if (!participant) {
             const userMobile = String(user.mobile || user.username).trim();
@@ -145,7 +146,7 @@ exports.getDashboard = async (req, res) => {
                     pType = 'coach';
                 }
             }
-            
+
             // Link records for future requests to improve performance
             if (reg && participant) {
                 user.registrationId = reg._id;
@@ -170,7 +171,7 @@ exports.getDashboard = async (req, res) => {
                 };
             }
         }
-        
+
         if (needsSave) {
             // Save in the background to avoid delaying the API response
             user.save().catch(err => console.error('Error backfilling user registration info:', err));
@@ -197,25 +198,54 @@ exports.getDashboard = async (req, res) => {
             }).sort({ mealDate: 1, mealType: 1 }).lean();
         }
 
-        const totalTokens = userFoodTokens.length;
-        const usedTokens = userFoodTokens.filter(t => t.status === 'REDEEMED').length;
-        const availableTokens = userFoodTokens.filter(t => t.status === 'ISSUED').length;
-        const ftStatus = totalTokens === 0 ? 'Inactive' : (availableTokens > 0 ? 'Active' : 'Used');
+        const defaultName = participant?.playerName || participant?.name || user.name || user.username || 'Participant';
+        const defaultMobile = participant?.mobileNo || user.mobile || user.username || '';
+        const defaultTeam = reg?.universityName || reg?.sport || '';
+        const defaultBlock = participant?.roomAllocation?.building || '';
+        const defaultRoom = participant?.roomAllocation?.roomNumber || '';
+
+        const tokensWithExpiry = userFoodTokens.map(t => {
+            const expired = t.status === 'ISSUED' && isMealTokenExpired(t.mealDate, t.mealType);
+            const blockVal = t.block || defaultBlock || '';
+            const roomVal = t.room || defaultRoom || '';
+            const stayText = (blockVal || roomVal)
+                ? [blockVal, roomVal ? (String(roomVal).toLowerCase().includes('room') ? roomVal : `Room ${roomVal}`) : ''].filter(Boolean).join(' - ')
+                : 'Not Allocated';
+
+            return {
+                id: t._id,
+                code: t.code,
+                name: t.name || defaultName,
+                identifier: t.identifier || defaultMobile,
+                teamOrSport: t.teamOrSport || defaultTeam,
+                block: blockVal,
+                room: roomVal,
+                stay: stayText,
+                eventName: t.eventName || 'South Zone Inter-University Chess Tournament',
+                mealType: t.mealType,
+                mealDate: t.mealDate,
+                status: expired ? 'EXPIRED' : t.status,
+                rawStatus: t.status,
+                isExpired: expired,
+                issuedAt: t.issuedAt,
+                lastPrintedAt: t.lastPrintedAt || t.issuedAt,
+                redeemedAt: t.redeemedAt
+            };
+        });
+
+        const activeTokens = tokensWithExpiry.filter(t => !t.isExpired && t.status !== 'CANCELLED');
+        const usedTokens = tokensWithExpiry.filter(t => t.rawStatus === 'REDEEMED').length;
+        const availableTokens = activeTokens.filter(t => t.status === 'ISSUED').length;
+        const totalTokens = activeTokens.length;
+        const ftStatus = activeTokens.length === 0 ? (usedTokens > 0 ? 'Used' : 'Inactive') : (availableTokens > 0 ? 'Active' : 'Used');
 
         const foodTokensData = {
             total: totalTokens,
             used: usedTokens,
             available: availableTokens,
+            expiredCount: tokensWithExpiry.filter(t => t.isExpired).length,
             status: ftStatus,
-            tokens: userFoodTokens.map(t => ({
-                id: t._id,
-                code: t.code,
-                mealType: t.mealType,
-                mealDate: t.mealDate,
-                status: t.status,
-                issuedAt: t.issuedAt,
-                redeemedAt: t.redeemedAt
-            }))
+            tokens: tokensWithExpiry
         };
 
         const userPhoto = user.photo || (participant && participant.photo) || null;
@@ -277,8 +307,8 @@ exports.getAccommodationDetails = async (req, res) => {
                 ]
             }).lean();
             if (reg) {
-                const p = reg.players.find(x => String(x.mobileNo).trim() === mobile) || 
-                          reg.coaches.find(x => String(x.mobileNo).trim() === mobile);
+                const p = reg.players.find(x => String(x.mobileNo).trim() === mobile) ||
+                    reg.coaches.find(x => String(x.mobileNo).trim() === mobile);
                 if (p && p.roomAllocation) {
                     building = p.roomAllocation.building;
                     roomNumber = p.roomAllocation.roomNumber;
@@ -419,9 +449,45 @@ exports.getFoodTokenDetails = async (req, res) => {
             }).sort({ mealDate: 1, mealType: 1 }).lean();
         }
 
-        const total = tokens.length;
-        const used = tokens.filter(t => t.status === 'REDEEMED').length;
-        const available = tokens.filter(t => t.status === 'ISSUED').length;
+        const defaultName = participant?.playerName || participant?.name || user.name || user.username || 'Participant';
+        const defaultMobile = participant?.mobileNo || user.mobile || user.username || '';
+        const defaultTeam = reg?.universityName || reg?.sport || '';
+        const defaultBlock = participant?.roomAllocation?.building || '';
+        const defaultRoom = participant?.roomAllocation?.roomNumber || '';
+
+        const tokensWithExpiry = tokens.map(t => {
+            const expired = t.status === 'ISSUED' && isMealTokenExpired(t.mealDate, t.mealType);
+            const blockVal = t.block || defaultBlock || '';
+            const roomVal = t.room || defaultRoom || '';
+            const stayText = (blockVal || roomVal)
+                ? [blockVal, roomVal ? (String(roomVal).toLowerCase().includes('room') ? roomVal : `Room ${roomVal}`) : ''].filter(Boolean).join(' - ')
+                : 'Not Allocated';
+
+            return {
+                id: t._id,
+                code: t.code,
+                name: t.name || defaultName,
+                identifier: t.identifier || defaultMobile,
+                teamOrSport: t.teamOrSport || defaultTeam,
+                block: blockVal,
+                room: roomVal,
+                stay: stayText,
+                eventName: t.eventName || 'South Zone Inter-University Chess Tournament',
+                mealType: t.mealType,
+                mealDate: t.mealDate,
+                status: expired ? 'EXPIRED' : t.status,
+                rawStatus: t.status,
+                isExpired: expired,
+                issuedAt: t.issuedAt,
+                lastPrintedAt: t.lastPrintedAt || t.issuedAt,
+                redeemedAt: t.redeemedAt
+            };
+        });
+
+        const activeTokens = tokensWithExpiry.filter(t => !t.isExpired && t.status !== 'CANCELLED');
+        const used = tokensWithExpiry.filter(t => t.rawStatus === 'REDEEMED').length;
+        const available = activeTokens.filter(t => t.status === 'ISSUED').length;
+        const total = activeTokens.length;
 
         res.status(200).json({
             userName: participant?.playerName || participant?.name || user.name || user.username,
@@ -429,16 +495,9 @@ exports.getFoodTokenDetails = async (req, res) => {
             total,
             used,
             available,
-            status: total === 0 ? 'Inactive' : (available > 0 ? 'Active' : 'Used'),
-            tokens: tokens.map(t => ({
-                id: t._id,
-                code: t.code,
-                mealType: t.mealType,
-                mealDate: t.mealDate,
-                status: t.status,
-                issuedAt: t.issuedAt,
-                redeemedAt: t.redeemedAt
-            }))
+            expiredCount: tokensWithExpiry.filter(t => t.isExpired).length,
+            status: total === 0 ? (used > 0 ? 'Used' : 'Inactive') : (available > 0 ? 'Active' : 'Used'),
+            tokens: tokensWithExpiry
         });
     } catch (error) {
         console.error('getFoodTokenDetails error:', error);
