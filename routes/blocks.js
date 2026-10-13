@@ -8,13 +8,16 @@ const {
     getGuidelines,
     updateGuidelines
 } = require('../controllers/blockController');
+const { verifyToken, requireAdmin } = require('../Modules/authMiddleware');
 
+// Public read routes
 router.get('/guidelines', getGuidelines);
-router.put('/guidelines', updateGuidelines);
-
-router.post('/', addBlock);
 router.get('/', getBlocks);
-router.put('/:id', updateBlock);
-router.delete('/:id', deleteBlock);
+
+// Protected administrative write routes
+router.put('/guidelines', verifyToken, requireAdmin, updateGuidelines);
+router.post('/', verifyToken, requireAdmin, addBlock);
+router.put('/:id', verifyToken, requireAdmin, updateBlock);
+router.delete('/:id', verifyToken, requireAdmin, deleteBlock);
 
 module.exports = router;

@@ -1,11 +1,20 @@
 const express = require('express');
 const router = express.Router();
+const crypto = require('crypto');
+const rateLimit = require('express-rate-limit');
 const Registration = require('../models/Registration');
 const User = require('../models/User');
 const { verifyToken, requireAdmin } = require('../Modules/authMiddleware');
 
+const registrationLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many registration requests. Please try again later.' }
+});
 
-router.post('/', async (req, res) => {
+router.post('/', registrationLimiter, async (req, res) => {
     try {
         const { teamDetails, players, coaches } = req.body;
         
@@ -122,7 +131,7 @@ router.post('/', async (req, res) => {
         // 3. Check for duplicate coach email IDs against existing registrations in DB
         const allSubmittedEmails = Array.from(seenEmailsInForm.keys());
         if (allSubmittedEmails.length > 0) {
-            const emailRegexList = allSubmittedEmails.map(e => new RegExp(`^${e}$`, 'i'));
+            const emailRegexList = allSubmittedEmails.map(e => new RegExp(`^${e.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'));
             const existingWithEmail = await Registration.findOne({
                 'coaches.mailId': { $in: emailRegexList }
             });
@@ -150,8 +159,12 @@ router.post('/', async (req, res) => {
         const savedRegistration = await newRegistration.save();
 
         let accountsCreated = 0;
+        const sampleCredentials = [];
 
-        // 1. Create or update user accounts for each player
+        // Default initial credentials for newly registered participants
+        const defaultPassword = process.env.DEFAULT_USER_PASSWORD || 'Aditya@123';
+
+        // 1. Create or link user accounts for each player
         if (Array.isArray(savedRegistration.players)) {
             for (const player of savedRegistration.players) {
                 try {
@@ -162,7 +175,7 @@ router.post('/', async (req, res) => {
                         await User.create({
                             username: mobile,
                             name: player.playerName,
-                            password: 'Aditya@123',
+                            password: defaultPassword,
                             mobile: mobile,
                             role: 'player',
                             registrationId: savedRegistration._id,
@@ -170,9 +183,21 @@ router.post('/', async (req, res) => {
                             participantType: 'player'
                         });
                         accountsCreated++;
+                        if (sampleCredentials.length === 0) {
+                            sampleCredentials.push({
+                                name: player.playerName,
+                                mobile: mobile,
+                                password: defaultPassword,
+                                role: 'player'
+                            });
+                        }
                     } else {
-                        existingUser.name = player.playerName || existingUser.name;
-                        existingUser.role = 'player';
+                        // Protect administrative accounts from being modified or demoted
+                        if (['admin', 'superadmin'].includes(existingUser.role)) {
+                            console.warn(`Participant registration skipped overriding admin account ${mobile}`);
+                            continue;
+                        }
+                        // Preserve existing participant password; only update participant reference
                         existingUser.registrationId = savedRegistration._id;
                         existingUser.participantId = player._id;
                         existingUser.participantType = 'player';
@@ -185,7 +210,7 @@ router.post('/', async (req, res) => {
             }
         }
 
-        // 2. Create or update user accounts for each coach/manager
+        // 2. Create or link user accounts for each coach/manager
         if (Array.isArray(savedRegistration.coaches)) {
             for (const coach of savedRegistration.coaches) {
                 try {
@@ -196,7 +221,7 @@ router.post('/', async (req, res) => {
                         await User.create({
                             username: mobile,
                             name: coach.name,
-                            password: 'Aditya@123',
+                            password: defaultPassword,
                             mobile: mobile,
                             role: 'coach',
                             registrationId: savedRegistration._id,
@@ -204,9 +229,21 @@ router.post('/', async (req, res) => {
                             participantType: 'coach'
                         });
                         accountsCreated++;
+                        if (sampleCredentials.length === 0) {
+                            sampleCredentials.push({
+                                name: coach.name,
+                                mobile: mobile,
+                                password: defaultPassword,
+                                role: 'coach'
+                            });
+                        }
                     } else {
-                        existingUser.name = coach.name || existingUser.name;
-                        existingUser.role = 'coach';
+                        // Protect administrative accounts
+                        if (['admin', 'superadmin'].includes(existingUser.role)) {
+                            console.warn(`Participant registration skipped overriding admin account ${mobile}`);
+                            continue;
+                        }
+                        // Preserve existing participant password
                         existingUser.registrationId = savedRegistration._id;
                         existingUser.participantId = coach._id;
                         existingUser.participantType = 'coach';
@@ -222,10 +259,6 @@ router.post('/', async (req, res) => {
         // Emit event for real-time update
         require('../socket').getIO().emit('dataUpdated');
 
-        const firstPlayer = savedRegistration.players?.[0];
-        const firstCoach = savedRegistration.coaches?.[0];
-        const sampleMember = firstPlayer || firstCoach;
-
         res.status(201).json({
             message: 'Registration successful',
             data: savedRegistration,
@@ -233,17 +266,12 @@ router.post('/', async (req, res) => {
                 totalPlayers: savedRegistration.players?.length || 0,
                 totalCoaches: savedRegistration.coaches?.length || 0,
                 accountsCreated,
-                sampleCredentials: {
-                    name: sampleMember ? (sampleMember.playerName || sampleMember.name) : '',
-                    mobile: sampleMember ? sampleMember.mobileNo : '',
-                    password: 'Aditya@123',
-                    role: firstPlayer ? 'player' : 'coach'
-                }
+                sampleCredentials: sampleCredentials[0] || null
             }
         });
     } catch (error) {
         console.error('Registration Error:', error);
-        res.status(500).json({ message: 'Server error during registration', error: error.message });
+        res.status(500).json({ message: 'Server error during registration' });
     }
 });
 
@@ -253,11 +281,11 @@ router.get('/', verifyToken, requireAdmin, async (req, res) => {
         res.status(200).json(registrations);
     } catch (error) {
         console.error('Error fetching registrations:', error);
-        res.status(500).json({ message: 'Failed to fetch registrations', error: error.message });
+        res.status(500).json({ message: 'Failed to fetch registrations' });
     }
 });
 
-router.put('/assign-room', async (req, res) => {
+router.put('/assign-room', verifyToken, requireAdmin, async (req, res) => {
     try {
         const { registrationId, personId, role, building, floor, roomNumber } = req.body;
 
@@ -327,11 +355,11 @@ router.put('/assign-room', async (req, res) => {
         res.status(200).json({ message: 'Room allocated successfully', allocation: allocationData });
     } catch (error) {
         console.error('Error assigning room:', error);
-        res.status(500).json({ message: 'Failed to assign room', error: error.message });
+        res.status(500).json({ message: 'Failed to assign room' });
     }
 });
 
-router.put('/unassign-room', async (req, res) => {
+router.put('/unassign-room', verifyToken, requireAdmin, async (req, res) => {
     try {
         const { registrationId, personId, role } = req.body;
 
@@ -360,7 +388,7 @@ router.put('/unassign-room', async (req, res) => {
         res.status(200).json({ message: 'Room unassigned successfully' });
     } catch (error) {
         console.error('Error unassigning room:', error);
-        res.status(500).json({ message: 'Failed to unassign room', error: error.message });
+        res.status(500).json({ message: 'Failed to unassign room' });
     }
 });
 

@@ -1,5 +1,12 @@
 const jwt = require('jsonwebtoken');
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_change_this';
+
+const getJwtSecret = () => {
+    const secret = process.env.JWT_SECRET;
+    if (!secret) {
+        throw new Error('FATAL: JWT_SECRET environment variable is missing.');
+    }
+    return secret;
+};
 
 // Verify JWT token middleware
 const verifyToken = (req, res, next) => {
@@ -11,7 +18,7 @@ const verifyToken = (req, res, next) => {
     }
 
     try {
-        const decoded = jwt.verify(token, JWT_SECRET);
+        const decoded = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] });
         req.user = decoded;
         next();
     } catch (error) {

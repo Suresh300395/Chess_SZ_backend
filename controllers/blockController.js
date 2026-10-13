@@ -55,7 +55,13 @@ exports.deleteBlock = async (req, res) => {
 exports.updateBlock = async (req, res) => {
     try {
         const { id } = req.params;
-        const updateData = req.body;
+        const allowedFields = ['name', 'block', 'warden', 'wardenContact', 'officeHours', 'address', 'capacityPerRoom', 'floors'];
+        const updateData = {};
+        for (const field of allowedFields) {
+            if (req.body[field] !== undefined) {
+                updateData[field] = req.body[field];
+            }
+        }
         
         if (updateData.name) {
             const existing = await HostelBlock.findOne({ name: updateData.name, _id: { $ne: id } });
@@ -64,14 +70,14 @@ exports.updateBlock = async (req, res) => {
             }
         }
         
-        const updatedBlock = await HostelBlock.findByIdAndUpdate(id, updateData, { new: true });
+        const updatedBlock = await HostelBlock.findByIdAndUpdate(id, { $set: updateData }, { new: true, runValidators: true });
         if (!updatedBlock) {
              return res.status(404).json({ message: 'Block not found' });
         }
         res.json({ message: 'Block updated successfully', block: updatedBlock });
     } catch (error) {
         console.error('Error updating block:', error);
-        res.status(500).json({ message: 'Server Error', error: error.message });
+        res.status(500).json({ message: 'Server Error' });
     }
 };
 

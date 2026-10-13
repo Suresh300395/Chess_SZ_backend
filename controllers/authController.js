@@ -6,7 +6,13 @@ const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const path = require('path');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_change_this';
+const getJwtSecret = () => {
+    const secret = process.env.JWT_SECRET;
+    if (!secret) {
+        throw new Error('FATAL: JWT_SECRET environment variable is missing.');
+    }
+    return secret;
+};
 const JWT_EXPIRES = '7d';
 
 // Helper: Format photo path to full URL for clients if relative
@@ -20,12 +26,12 @@ const formatPhotoUrl = (req, photoPath) => {
     return `${protocol}://${host}${photoPath.startsWith('/') ? '' : '/'}${photoPath}`;
 };
 
-// Helper: generate JWT token
+// Helper: generate JWT token with algorithm restriction
 const generateToken = (user) => {
     return jwt.sign(
         { id: user._id, username: user.username, role: user.role },
-        JWT_SECRET,
-        { expiresIn: JWT_EXPIRES }
+        getJwtSecret(),
+        { algorithm: 'HS256', expiresIn: JWT_EXPIRES }
     );
 };
 
@@ -616,10 +622,11 @@ exports.updateProfilePhoto = async (req, res) => {
             const fileName = `profile-${user._id}-${Date.now()}.${ext}`;
             const targetFilePath = path.join(uploadDir, fileName);
 
-            // Clean up old uploaded image file if exists
-            if (user.photo && user.photo.startsWith('/uploads/profiles/')) {
-                const oldFilePath = path.join(__dirname, '../public', user.photo);
-                if (fs.existsSync(oldFilePath)) {
+            // Clean up old uploaded image file safely without path traversal
+            if (user.photo && typeof user.photo === 'string' && user.photo.startsWith('/uploads/profiles/')) {
+                const safeDir = path.resolve(__dirname, '../public/uploads/profiles');
+                const oldFilePath = path.resolve(__dirname, '../public', '.' + user.photo);
+                if (oldFilePath.startsWith(safeDir) && fs.existsSync(oldFilePath)) {
                     try { fs.unlinkSync(oldFilePath); } catch (e) { /* ignore */ }
                 }
             }
@@ -659,22 +666,64 @@ exports.updateProfilePhoto = async (req, res) => {
         });
     } catch (error) {
         console.error('Update profile photo error:', error);
-        res.status(500).json({ message: 'Failed to update photo', error: error.message });
+        res.status(500).json({ message: 'Failed to update photo' });
     }
 };
 
+// Authenticated password change endpoint
+exports.changePassword = async (req, res) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ message: 'Current password and new password are required' });
+        }
+        if (typeof newPassword !== 'string' || newPassword.length < 8) {
+            return res.status(400).json({ message: 'New password must be at least 8 characters long' });
+        }
+
+        let account = await Admin.findById(req.user.id);
+        if (!account) {
+            account = await User.findById(req.user.id);
+        }
+
+        if (!account) {
+            return res.status(404).json({ message: 'Account not found' });
+        }
+
+        const isMatch = await account.comparePassword(currentPassword);
+        if (!isMatch) {
+            return res.status(401).json({ message: 'Current password is incorrect' });
+        }
+
+        account.password = newPassword; // Auto-hashed by pre-save hook
+        await account.save();
+
+        res.status(200).json({ message: 'Password changed successfully' });
+    } catch (error) {
+        console.error('Change password error:', error);
+        res.status(500).json({ message: 'Failed to change password' });
+    }
+};
+
+// Secure initial administrator provisioning without hardcoded credentials
 exports.seedAdmin = async () => {
     try {
-        const existingAdmin = await Admin.findOne({ username: 'superadmin' });
-        if (!existingAdmin) {
-            await Admin.create({
-                username: 'superadmin',
-                password: 'Aditya@123',
-                role: 'superadmin'
-            });
-            console.log('✅ Super admin seeded');
+        const initialUser = process.env.INITIAL_ADMIN_USERNAME;
+        const initialPass = process.env.INITIAL_ADMIN_PASSWORD;
+
+        // Only provision if credentials are intentionally supplied in environment configuration
+        if (initialUser && initialPass) {
+            const existingAdmin = await Admin.findOne({ username: initialUser });
+            if (!existingAdmin) {
+                await Admin.create({
+                    username: initialUser,
+                    password: initialPass,
+                    role: 'superadmin'
+                });
+                console.log(`✅ Initial administrator account created for '${initialUser}'`);
+            }
         }
     } catch (error) {
-        console.error('Error seeding admin:', error.message);
+        console.error('Admin provisioning note:', error.message);
     }
 };

@@ -13,9 +13,17 @@ const blocksRoutes = require('./routes/blocks');
 const foodTokenRoutes = require('./routes/foodTokens');
 const routeMapRoutes = require('./routes/routeMap');
 const liveBoardRoutes = require('./routes/liveBoard');
+const helmet = require('helmet');
 const authController = require('./controllers/authController');
 
 var app = express();
+app.disable('x-powered-by');
+
+// Security headers with Helmet
+app.use(helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+}));
+
 connectDB().then(() => {
     authController.seedAdmin();
 });

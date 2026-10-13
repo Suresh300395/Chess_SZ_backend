@@ -3,6 +3,7 @@ const router = express.Router();
 const fs = require('fs');
 const path = require('path');
 const Committee = require('../models/Committee');
+const { verifyToken, requireAdmin } = require('../Modules/authMiddleware');
 
 const uploadDir = path.join(__dirname, '../public/uploads/committee');
 if (!fs.existsSync(uploadDir)) {
@@ -31,14 +32,15 @@ const saveBase64Image = async (base64Str, prefix = 'committee') => {
     return `/uploads/committee/${fileName}`;
 };
 
-// Helper: Delete physical image file from disk
+// Helper: Delete physical image file from disk securely without path traversal
 const deleteImageFile = (photoPath) => {
     if (!photoPath || typeof photoPath !== 'string') return;
     const match = photoPath.match(/\/uploads\/committee\/[^\s?#]+/);
     if (match) {
         const relativePath = match[0];
-        const filePath = path.join(__dirname, '../public', relativePath);
-        if (fs.existsSync(filePath)) {
+        const safeDir = path.resolve(__dirname, '../public/uploads/committee');
+        const filePath = path.resolve(__dirname, '../public', '.' + relativePath);
+        if (filePath.startsWith(safeDir) && fs.existsSync(filePath)) {
             try {
                 fs.unlinkSync(filePath);
             } catch (err) {
@@ -59,8 +61,8 @@ const formatPhotoUrl = (req, photoPath) => {
     return `${protocol}://${host}${photoPath.startsWith('/') ? '' : '/'}${photoPath}`;
 };
 
-// POST route to add a new committee member
-router.post('/', async (req, res) => {
+// POST route to add a new committee member (Admin only)
+router.post('/', verifyToken, requireAdmin, async (req, res) => {
     try {
         const { memberName, designation, position, email, phone, photo, order } = req.body;
         
@@ -113,15 +115,22 @@ router.get('/', async (req, res) => {
     }
 });
 
-// PUT route to update a committee member
-router.put('/:id', async (req, res) => {
+// PUT route to update a committee member (Admin only)
+router.put('/:id', verifyToken, requireAdmin, async (req, res) => {
     try {
         const existingMember = await Committee.findById(req.params.id);
         if (!existingMember) {
             return res.status(404).json({ error: 'Member not found' });
         }
 
-        const updateData = { ...req.body };
+        const allowedFields = ['memberName', 'designation', 'position', 'email', 'phone', 'photo', 'order'];
+        const updateData = {};
+        for (const field of allowedFields) {
+            if (req.body[field] !== undefined) {
+                updateData[field] = req.body[field];
+            }
+        }
+
         if (updateData.order !== undefined && updateData.order !== '') {
             updateData.order = Number(updateData.order);
         }
@@ -156,8 +165,8 @@ router.put('/:id', async (req, res) => {
     }
 });
 
-// PUT route to update order of a committee member
-router.put('/:id/order', async (req, res) => {
+// PUT route to update order of a committee member (Admin only)
+router.put('/:id/order', verifyToken, requireAdmin, async (req, res) => {
     try {
         const { order } = req.body;
         const updatedMember = await Committee.findByIdAndUpdate(
@@ -186,8 +195,8 @@ router.put('/:id/order', async (req, res) => {
     }
 });
 
-// DELETE route to remove a committee member and their photo file
-router.delete('/:id', async (req, res) => {
+// DELETE route to remove a committee member and their photo file (Admin only)
+router.delete('/:id', verifyToken, requireAdmin, async (req, res) => {
     try {
         const member = await Committee.findById(req.params.id);
         

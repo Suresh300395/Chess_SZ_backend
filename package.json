@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "start": "node ./bin/www",
-    "dev": "nodemon ./bin/www"
+    "dev": "nodemon ./bin/www",
+    "test": "node --test tests/**/*.test.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -12,7 +13,9 @@
     "cors": "^2.8.6",
     "debug": "~2.6.9",
     "dotenv": "^18.0.5",
-    "express": "~4.16.1",
+    "express": "^4.22.3",
+    "express-rate-limit": "^8.7.1",
+    "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.10.4",
     "morgan": "~1.9.1",

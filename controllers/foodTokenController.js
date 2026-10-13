@@ -14,6 +14,12 @@ const emitSocketUpdate = () => {
     }
 };
 
+// Helper to escape regex special characters to prevent ReDoS
+const escapeRegex = (string) => {
+    if (typeof string !== 'string') return '';
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+};
+
 /**
  * 1. Search people eligible for tokens (Players, Coaches, Managers)
  * GET /api/food-tokens/people?search=
@@ -22,7 +28,7 @@ exports.getPeople = async (req, res) => {
     try {
         const search = (req.query.search || '').trim();
         const mealDate = getTodayString();
-        const searchRegex = new RegExp(search, 'i');
+        const searchRegex = new RegExp(escapeRegex(search), 'i');
 
         const people = [];
 
@@ -847,7 +853,7 @@ exports.getTokens = async (req, res) => {
         if (personType) filter.personType = personType;
 
         if (search && search.trim()) {
-            const regex = new RegExp(search.trim(), 'i');
+            const regex = new RegExp(escapeRegex(search.trim()), 'i');
             filter.$or = [
                 { code: regex },
                 { name: regex },
