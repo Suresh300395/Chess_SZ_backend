@@ -41,7 +41,6 @@ const deleteImageFile = (photoPath) => {
         if (fs.existsSync(filePath)) {
             try {
                 fs.unlinkSync(filePath);
-                console.log(`Deleted committee member photo file: ${filePath}`);
             } catch (err) {
                 console.error(`Error deleting committee photo file: ${filePath}`, err);
             }
