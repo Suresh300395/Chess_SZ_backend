@@ -46,4 +46,7 @@ const registrationSchema = new mongoose.Schema({
     coaches: [coachSchema]
 }, { timestamps: true });
 
+// Case-insensitive unique index to prevent duplicate universities
+registrationSchema.index({ universityName: 1 }, { unique: true, collation: { locale: 'en', strength: 2 } });
+
 module.exports = mongoose.model('Registration', registrationSchema);
