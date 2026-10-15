@@ -264,7 +264,14 @@ exports.getDashboard = async (req, res) => {
             photoPath: userPhoto,
             accommodation: mappedAcc,
             foodTokens: foodTokensData,
-            cautionDeposit: {
+            cautionDeposit: (reg && reg.cautionDeposit && reg.cautionDeposit.paid) ? {
+                amount: reg.cautionDeposit.amount || 2000,
+                paid: true,
+                refundStatus: reg.cautionDeposit.refundStatus || 'Refund Pending',
+                paidBy: reg.cautionDeposit.paidBy?.name || 'Representative',
+                receiptNo: reg.cautionDeposit.receiptNo || '',
+                paidAt: reg.cautionDeposit.paidAt
+            } : {
                 amount: 0,
                 paid: false,
                 refundStatus: 'N/A'

@@ -1037,6 +1037,26 @@ router.put('/unassign-room', verifyToken, requireAdmin, async (req, res) => {
             );
         }
 
+        // Check if registration still has any allotted members left
+        const updatedReg = await Registration.findById(registrationId);
+        if (updatedReg) {
+            const hasAnyAllocated = (updatedReg.players || []).some(p => p.roomAllocation && p.roomAllocation.roomNumber) ||
+                                    (updatedReg.coaches || []).some(c => c.roomAllocation && c.roomAllocation.roomNumber);
+            if (!hasAnyAllocated && updatedReg.cautionDeposit && updatedReg.cautionDeposit.paid) {
+                updatedReg.cautionDeposit = {
+                    paid: false,
+                    amount: 2000,
+                    paidBy: { personId: '', name: '', role: '', phone: '', roomNumber: '' },
+                    paymentMode: 'Cash',
+                    receiptNo: '',
+                    notes: '',
+                    refundStatus: 'N/A',
+                    refundedAmount: 0
+                };
+                await updatedReg.save();
+            }
+        }
+
         try {
             require('../socket').getIO().emit('dataUpdated');
         } catch (socketErr) {
@@ -1047,6 +1067,150 @@ router.put('/unassign-room', verifyToken, requireAdmin, async (req, res) => {
     } catch (error) {
         console.error('Error unassigning room:', error);
         res.status(500).json({ message: 'Failed to unassign room' });
+    }
+});
+
+// Record manual caution deposit payment
+router.put('/caution-deposit', verifyToken, requireAdmin, async (req, res) => {
+    try {
+        const { registrationId, universityName, paidBy, amount, paymentMode, notes, receiptNo } = req.body;
+
+        let query = {};
+        if (registrationId && mongoose.Types.ObjectId.isValid(registrationId)) {
+            query._id = registrationId;
+        } else if (universityName) {
+            query.universityName = universityName;
+        } else {
+            return res.status(400).json({ message: 'Missing registrationId or universityName' });
+        }
+
+        const registration = await Registration.findOne(query);
+        if (!registration) {
+            return res.status(404).json({ message: 'Registration not found' });
+        }
+
+        const generatedReceiptNo = receiptNo || `CD-${Date.now().toString().slice(-6)}`;
+        const depositData = {
+            paid: true,
+            amount: Number(amount) || 2000,
+            paidBy: {
+                personId: paidBy?.personId || '',
+                name: paidBy?.name || 'Representative',
+                role: paidBy?.role || 'Player',
+                phone: paidBy?.phone || '',
+                roomNumber: paidBy?.roomNumber || ''
+            },
+            paymentMode: paymentMode || 'Cash',
+            receiptNo: generatedReceiptNo,
+            paidAt: new Date(),
+            collectedBy: req.user?.username || req.user?.name || 'Hostel Admin',
+            notes: notes || 'Cash collected manually at hostel counter',
+            refundStatus: 'Refund Pending',
+            refundedAmount: 0
+        };
+
+        registration.cautionDeposit = depositData;
+        await registration.save();
+
+        try {
+            require('../socket').getIO().emit('dataUpdated');
+            require('../socket').getIO().emit('caution_deposit_updated', {
+                universityName: registration.universityName,
+                cautionDeposit: depositData
+            });
+        } catch (socketErr) {
+            console.error('Socket error in caution deposit update:', socketErr);
+        }
+
+        res.status(200).json({
+            message: `Caution deposit of ₹${depositData.amount} successfully recorded for ${registration.universityName}!`,
+            cautionDeposit: depositData
+        });
+    } catch (error) {
+        console.error('Error recording caution deposit:', error);
+        res.status(500).json({ message: 'Failed to record caution deposit payment' });
+    }
+});
+
+// Mark caution deposit as refunded
+router.put('/caution-deposit/refund', verifyToken, requireAdmin, async (req, res) => {
+    try {
+        const { registrationId, universityName, refundedAmount } = req.body;
+        let query = {};
+        if (registrationId && mongoose.Types.ObjectId.isValid(registrationId)) {
+            query._id = registrationId;
+        } else if (universityName) {
+            query.universityName = universityName;
+        } else {
+            return res.status(400).json({ message: 'Missing registrationId or universityName' });
+        }
+
+        const registration = await Registration.findOne(query);
+        if (!registration) {
+            return res.status(404).json({ message: 'Registration not found' });
+        }
+
+        if (!registration.cautionDeposit || !registration.cautionDeposit.paid) {
+            return res.status(400).json({ message: 'Caution deposit has not been paid yet' });
+        }
+
+        registration.cautionDeposit.refundStatus = 'Refunded';
+        registration.cautionDeposit.refundedAt = new Date();
+        registration.cautionDeposit.refundedAmount = Number(refundedAmount) || registration.cautionDeposit.amount || 2000;
+        await registration.save();
+
+        try {
+            require('../socket').getIO().emit('dataUpdated');
+        } catch (sErr) {}
+
+        res.status(200).json({
+            message: `Caution deposit marked as refunded for ${registration.universityName}`,
+            cautionDeposit: registration.cautionDeposit
+        });
+    } catch (error) {
+        console.error('Error refunding caution deposit:', error);
+        res.status(500).json({ message: 'Failed to process caution deposit refund' });
+    }
+});
+
+// Reset / delete caution deposit payment
+router.delete('/caution-deposit', verifyToken, requireAdmin, async (req, res) => {
+    try {
+        const { registrationId, universityName } = req.body;
+        let query = {};
+        if (registrationId && mongoose.Types.ObjectId.isValid(registrationId)) {
+            query._id = registrationId;
+        } else if (universityName) {
+            query.universityName = universityName;
+        } else {
+            return res.status(400).json({ message: 'Missing registrationId or universityName' });
+        }
+
+        const registration = await Registration.findOne(query);
+        if (!registration) {
+            return res.status(404).json({ message: 'Registration not found' });
+        }
+
+        registration.cautionDeposit = {
+            paid: false,
+            amount: 2000,
+            paidBy: { personId: '', name: '', role: '', phone: '', roomNumber: '' },
+            paymentMode: 'Cash',
+            receiptNo: '',
+            notes: '',
+            refundStatus: 'N/A',
+            refundedAmount: 0
+        };
+        await registration.save();
+
+        try {
+            require('../socket').getIO().emit('dataUpdated');
+        } catch (sErr) {}
+
+        res.status(200).json({ message: 'Caution deposit reset successfully' });
+    } catch (error) {
+        console.error('Error resetting caution deposit:', error);
+        res.status(500).json({ message: 'Failed to reset caution deposit' });
     }
 });
 
