@@ -1,7 +1,7 @@
 const User = require('../models/User');
 const Admin = require('../models/Admin');
 const HostelBlock = require('../models/HostelBlock');
-const { isMealTokenExpired } = require('../config/mealConfig');
+const { isMealTokenExpired, MEAL_TYPES } = require('../config/mealConfig');
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const path = require('path');
@@ -200,6 +200,7 @@ exports.getDashboard = async (req, res) => {
         if (tokenOrConditions.length > 0) {
             userFoodTokens = await FoodToken.find({
                 $or: tokenOrConditions,
+                mealType: { $in: MEAL_TYPES },
                 status: { $ne: 'CANCELLED' }
             }).sort({ mealDate: 1, mealType: 1 }).lean();
         }
@@ -256,26 +257,49 @@ exports.getDashboard = async (req, res) => {
 
         const userPhoto = user.photo || (participant && participant.photo) || null;
 
+        const isCoach = pType === 'coach' || user.role === 'coach' || user.participantType === 'coach';
+        let cautionDepositData = {
+            amount: 2000,
+            paid: false,
+            refundStatus: 'N/A'
+        };
+
+        if (isCoach) {
+            const coachDeposit = participant?.cautionDeposit;
+            if (coachDeposit && coachDeposit.paid) {
+                cautionDepositData = {
+                    amount: coachDeposit.amount || 2000,
+                    paid: true,
+                    refundStatus: coachDeposit.refundStatus || 'Refund Pending',
+                    paidBy: coachDeposit.paidBy?.name || participant?.name || user.name || 'Coach',
+                    receiptNo: coachDeposit.receiptNo || '',
+                    paidAt: coachDeposit.paidAt
+                };
+            }
+        } else {
+            // Player / Student
+            if (reg && reg.cautionDeposit && reg.cautionDeposit.paid) {
+                cautionDepositData = {
+                    amount: reg.cautionDeposit.amount || 2000,
+                    paid: true,
+                    refundStatus: reg.cautionDeposit.refundStatus || 'Refund Pending',
+                    paidBy: reg.cautionDeposit.paidBy?.name || 'Representative',
+                    receiptNo: reg.cautionDeposit.receiptNo || '',
+                    paidAt: reg.cautionDeposit.paidAt
+                };
+            }
+        }
+
         res.status(200).json({
             name: user.name || user.username,
             email: user.username,
             role: user.role,
+            userType: isCoach ? 'coach' : 'player',
             photo: formatPhotoUrl(req, userPhoto),
             photoPath: userPhoto,
             accommodation: mappedAcc,
             foodTokens: foodTokensData,
-            cautionDeposit: (reg && reg.cautionDeposit && reg.cautionDeposit.paid) ? {
-                amount: reg.cautionDeposit.amount || 2000,
-                paid: true,
-                refundStatus: reg.cautionDeposit.refundStatus || 'Refund Pending',
-                paidBy: reg.cautionDeposit.paidBy?.name || 'Representative',
-                receiptNo: reg.cautionDeposit.receiptNo || '',
-                paidAt: reg.cautionDeposit.paidAt
-            } : {
-                amount: 0,
-                paid: false,
-                refundStatus: 'N/A'
-            },
+            cautionDeposit: cautionDepositData,
             details: playerDetails
         });
     } catch (error) {
@@ -458,6 +482,7 @@ exports.getFoodTokenDetails = async (req, res) => {
         if (tokenOrConditions.length > 0) {
             tokens = await FoodToken.find({
                 $or: tokenOrConditions,
+                mealType: { $in: MEAL_TYPES },
                 status: { $ne: 'CANCELLED' }
             }).sort({ mealDate: 1, mealType: 1 }).lean();
         }

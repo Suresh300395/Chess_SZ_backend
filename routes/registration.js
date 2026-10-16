@@ -1073,7 +1073,7 @@ router.put('/unassign-room', verifyToken, requireAdmin, async (req, res) => {
 // Record manual caution deposit payment
 router.put('/caution-deposit', verifyToken, requireAdmin, async (req, res) => {
     try {
-        const { registrationId, universityName, paidBy, amount, paymentMode, notes, receiptNo } = req.body;
+        const { registrationId, universityName, coachId, paidBy, amount, paymentMode, notes, receiptNo } = req.body;
 
         let query = {};
         if (registrationId && mongoose.Types.ObjectId.isValid(registrationId)) {
@@ -1096,7 +1096,7 @@ router.put('/caution-deposit', verifyToken, requireAdmin, async (req, res) => {
             paidBy: {
                 personId: paidBy?.personId || '',
                 name: paidBy?.name || 'Representative',
-                role: paidBy?.role || 'Player',
+                role: paidBy?.role || (coachId ? 'Coach' : 'Player'),
                 phone: paidBy?.phone || '',
                 roomNumber: paidBy?.roomNumber || ''
             },
@@ -1109,6 +1109,34 @@ router.put('/caution-deposit', verifyToken, requireAdmin, async (req, res) => {
             refundedAmount: 0
         };
 
+        if (coachId) {
+            const coach = registration.coaches.id(coachId) || (registration.coaches || []).find(c => c._id.toString() === coachId.toString());
+            if (!coach) {
+                return res.status(404).json({ message: 'Coach not found in registration' });
+            }
+            coach.cautionDeposit = depositData;
+            registration.markModified('coaches');
+            await registration.save();
+
+            try {
+                require('../socket').getIO().emit('dataUpdated');
+                require('../socket').getIO().emit('caution_deposit_updated', {
+                    universityName: registration.universityName,
+                    coachId,
+                    cautionDeposit: depositData
+                });
+            } catch (socketErr) {
+                console.error('Socket error in coach caution deposit update:', socketErr);
+            }
+
+            return res.status(200).json({
+                message: `Caution deposit of ₹${depositData.amount} successfully recorded for Coach ${coach.name} (${registration.universityName})!`,
+                cautionDeposit: depositData,
+                coachId
+            });
+        }
+
+        // Team / Players Caution Deposit
         registration.cautionDeposit = depositData;
         await registration.save();
 
@@ -1135,7 +1163,7 @@ router.put('/caution-deposit', verifyToken, requireAdmin, async (req, res) => {
 // Mark caution deposit as refunded
 router.put('/caution-deposit/refund', verifyToken, requireAdmin, async (req, res) => {
     try {
-        const { registrationId, universityName, refundedAmount } = req.body;
+        const { registrationId, universityName, coachId, refundedAmount } = req.body;
         let query = {};
         if (registrationId && mongoose.Types.ObjectId.isValid(registrationId)) {
             query._id = registrationId;
@@ -1150,6 +1178,37 @@ router.put('/caution-deposit/refund', verifyToken, requireAdmin, async (req, res
             return res.status(404).json({ message: 'Registration not found' });
         }
 
+        if (coachId) {
+            const coach = registration.coaches.id(coachId) || (registration.coaches || []).find(c => c._id.toString() === coachId.toString());
+            if (!coach) {
+                return res.status(404).json({ message: 'Coach not found' });
+            }
+            if (!coach.cautionDeposit || !coach.cautionDeposit.paid) {
+                return res.status(400).json({ message: 'Coach caution deposit has not been paid yet' });
+            }
+
+            coach.cautionDeposit.refundStatus = 'Refunded';
+            coach.cautionDeposit.refundedAt = new Date();
+            coach.cautionDeposit.refundedAmount = Number(refundedAmount) || coach.cautionDeposit.amount || 2000;
+            registration.markModified('coaches');
+            await registration.save();
+
+            try {
+                require('../socket').getIO().emit('dataUpdated');
+                require('../socket').getIO().emit('caution_deposit_updated', {
+                    universityName: registration.universityName,
+                    coachId,
+                    cautionDeposit: coach.cautionDeposit
+                });
+            } catch (sErr) {}
+
+            return res.status(200).json({
+                message: `Caution deposit marked as refunded for Coach ${coach.name}`,
+                cautionDeposit: coach.cautionDeposit,
+                coachId
+            });
+        }
+
         if (!registration.cautionDeposit || !registration.cautionDeposit.paid) {
             return res.status(400).json({ message: 'Caution deposit has not been paid yet' });
         }
@@ -1161,6 +1220,10 @@ router.put('/caution-deposit/refund', verifyToken, requireAdmin, async (req, res
 
         try {
             require('../socket').getIO().emit('dataUpdated');
+            require('../socket').getIO().emit('caution_deposit_updated', {
+                universityName: registration.universityName,
+                cautionDeposit: registration.cautionDeposit
+            });
         } catch (sErr) {}
 
         res.status(200).json({
@@ -1176,7 +1239,7 @@ router.put('/caution-deposit/refund', verifyToken, requireAdmin, async (req, res
 // Reset / delete caution deposit payment
 router.delete('/caution-deposit', verifyToken, requireAdmin, async (req, res) => {
     try {
-        const { registrationId, universityName } = req.body;
+        const { registrationId, universityName, coachId } = req.body;
         let query = {};
         if (registrationId && mongoose.Types.ObjectId.isValid(registrationId)) {
             query._id = registrationId;
@@ -1189,6 +1252,36 @@ router.delete('/caution-deposit', verifyToken, requireAdmin, async (req, res) =>
         const registration = await Registration.findOne(query);
         if (!registration) {
             return res.status(404).json({ message: 'Registration not found' });
+        }
+
+        if (coachId) {
+            const coach = registration.coaches.id(coachId) || (registration.coaches || []).find(c => c._id.toString() === coachId.toString());
+            if (!coach) {
+                return res.status(404).json({ message: 'Coach not found' });
+            }
+            coach.cautionDeposit = {
+                paid: false,
+                amount: 2000,
+                paidBy: { personId: '', name: '', role: 'Coach', phone: '', roomNumber: '' },
+                paymentMode: 'Cash',
+                receiptNo: '',
+                notes: '',
+                refundStatus: 'N/A',
+                refundedAmount: 0
+            };
+            registration.markModified('coaches');
+            await registration.save();
+
+            try {
+                require('../socket').getIO().emit('dataUpdated');
+                require('../socket').getIO().emit('caution_deposit_updated', {
+                    universityName: registration.universityName,
+                    coachId,
+                    cautionDeposit: coach.cautionDeposit
+                });
+            } catch (sErr) {}
+
+            return res.status(200).json({ message: `Caution deposit reset for Coach ${coach.name}` });
         }
 
         registration.cautionDeposit = {
@@ -1205,6 +1298,10 @@ router.delete('/caution-deposit', verifyToken, requireAdmin, async (req, res) =>
 
         try {
             require('../socket').getIO().emit('dataUpdated');
+            require('../socket').getIO().emit('caution_deposit_updated', {
+                universityName: registration.universityName,
+                cautionDeposit: registration.cautionDeposit
+            });
         } catch (sErr) {}
 
         res.status(200).json({ message: 'Caution deposit reset successfully' });

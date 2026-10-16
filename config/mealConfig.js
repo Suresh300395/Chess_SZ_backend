@@ -1,4 +1,4 @@
-const MEAL_TYPES = ['Breakfast', 'Lunch', 'Snacks', 'Dinner'];
+const MEAL_TYPES = ['Breakfast', 'Lunch', 'Dinner'];
 const ORGANIZATION_NAME = 'Aditya University';
 const EVENT_NAME = 'South Zone Inter-University Chess Tournament';
 const DEFAULT_PAPER_WIDTH = '80mm';
@@ -6,13 +6,11 @@ const DEFAULT_PAPER_WIDTH = '80mm';
 // Expiration cutoff times for each meal
 // Breakfast: 10:00 AM
 // Lunch: 2:00 PM (14:00)
-// Snacks: 6:00 PM (18:00)
 // Dinner: 9:00 PM (21:00)
 const MEAL_EXPIRY_TIMES = {
-    'Breakfast': { hour: 10, minute: 0, label: '10:00 AM' },
-    'Lunch': { hour: 14, minute: 0, label: '2:00 PM' },
-    'Snacks': { hour: 18, minute: 0, label: '6:00 PM' },
-    'Dinner': { hour: 21, minute: 0, label: '9:00 PM' }
+    'Breakfast': { hour: 11, minute: 0, label: '11:00 AM' },
+    'Lunch': { hour: 15, minute: 0, label: '3:00 PM' },
+    'Dinner': { hour: 22, minute: 0, label: '10:00 PM' }
 };
 
 /**
@@ -45,11 +43,10 @@ const parseMealExpiryDateTime = (mealDateStr, mealType) => {
     }
 
     const typeLower = (mealType || '').trim().toLowerCase();
-    const cutoff = typeLower.includes('breakfast') ? { hour: 10, minute: 0 }
-        : typeLower.includes('lunch') ? { hour: 14, minute: 0 }
-        : typeLower.includes('snack') ? { hour: 18, minute: 0 }
-        : typeLower.includes('dinner') ? { hour: 21, minute: 0 }
-        : { hour: 23, minute: 59 };
+    const cutoff = typeLower.includes('breakfast') ? { hour: 11, minute: 0 }
+        : typeLower.includes('lunch') ? { hour: 15, minute: 0 }
+            : typeLower.includes('dinner') ? { hour: 22, minute: 0 }
+                : { hour: 23, minute: 59 };
 
     return new Date(y, m, d, cutoff.hour, cutoff.minute, 0, 0);
 };

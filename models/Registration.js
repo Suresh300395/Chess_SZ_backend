@@ -21,23 +21,6 @@ const playerSchema = new mongoose.Schema({
     photo: { type: String, default: '' }
 });
 
-const coachSchema = new mongoose.Schema({
-    role: { type: String, required: true },
-    name: { type: String, required: true },
-    mobileNo: { type: String, required: true },
-    mailId: { type: String, required: true },
-    gender: { type: String, required: true },
-    foodType: { type: String, required: true },
-    accommodation: { type: String, required: true },
-    roomAllocation: {
-        building: { type: String },
-        floor: { type: String },
-        roomNumber: { type: String },
-        allocatedAt: { type: Date }
-    },
-    photo: { type: String, default: '' }
-});
-
 const cautionDepositSchema = new mongoose.Schema({
     paid: { type: Boolean, default: false },
     amount: { type: Number, default: 2000 },
@@ -57,6 +40,31 @@ const cautionDepositSchema = new mongoose.Schema({
     refundedAt: { type: Date },
     refundedAmount: { type: Number, default: 0 }
 }, { _id: false });
+
+const coachSchema = new mongoose.Schema({
+    role: { type: String, required: true },
+    name: { type: String, required: true },
+    mobileNo: { type: String, required: true },
+    mailId: { type: String, required: true },
+    gender: { type: String, required: true },
+    foodType: { type: String, required: true },
+    accommodation: { type: String, required: true },
+    roomAllocation: {
+        building: { type: String },
+        floor: { type: String },
+        roomNumber: { type: String },
+        allocatedAt: { type: Date }
+    },
+    cautionDeposit: {
+        type: cautionDepositSchema,
+        default: () => ({
+            paid: false,
+            amount: 2000,
+            refundStatus: 'N/A'
+        })
+    },
+    photo: { type: String, default: '' }
+});
 
 const registrationSchema = new mongoose.Schema({
     universityName: { type: String, required: true },
