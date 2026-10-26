@@ -259,7 +259,7 @@ exports.getDashboard = async (req, res) => {
 
         const isCoach = pType === 'coach' || user.role === 'coach' || user.participantType === 'coach';
         let cautionDepositData = {
-            amount: 2000,
+            amount: 0,
             paid: false,
             refundStatus: 'N/A'
         };
@@ -268,7 +268,7 @@ exports.getDashboard = async (req, res) => {
             const coachDeposit = participant?.cautionDeposit;
             if (coachDeposit && coachDeposit.paid) {
                 cautionDepositData = {
-                    amount: coachDeposit.amount || 2000,
+                    amount: Number(coachDeposit.amount) || 0,
                     paid: true,
                     refundStatus: coachDeposit.refundStatus || 'Refund Pending',
                     paidBy: coachDeposit.paidBy?.name || participant?.name || user.name || 'Coach',
@@ -280,7 +280,7 @@ exports.getDashboard = async (req, res) => {
             // Player / Student
             if (reg && reg.cautionDeposit && reg.cautionDeposit.paid) {
                 cautionDepositData = {
-                    amount: reg.cautionDeposit.amount || 2000,
+                    amount: Number(reg.cautionDeposit.amount) || 0,
                     paid: true,
                     refundStatus: reg.cautionDeposit.refundStatus || 'Refund Pending',
                     paidBy: reg.cautionDeposit.paidBy?.name || 'Representative',

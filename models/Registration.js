@@ -23,7 +23,7 @@ const playerSchema = new mongoose.Schema({
 
 const cautionDepositSchema = new mongoose.Schema({
     paid: { type: Boolean, default: false },
-    amount: { type: Number, default: 2000 },
+    amount: { type: Number, default: 0 },
     paidBy: {
         personId: { type: String, default: '' },
         name: { type: String, default: '' },
@@ -59,7 +59,7 @@ const coachSchema = new mongoose.Schema({
         type: cautionDepositSchema,
         default: () => ({
             paid: false,
-            amount: 2000,
+            amount: 0,
             refundStatus: 'N/A'
         })
     },
@@ -76,7 +76,7 @@ const registrationSchema = new mongoose.Schema({
         type: cautionDepositSchema,
         default: () => ({
             paid: false,
-            amount: 2000,
+            amount: 0,
             refundStatus: 'N/A'
         })
     }

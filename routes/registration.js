@@ -1045,7 +1045,7 @@ router.put('/unassign-room', verifyToken, requireAdmin, async (req, res) => {
             if (!hasAnyAllocated && updatedReg.cautionDeposit && updatedReg.cautionDeposit.paid) {
                 updatedReg.cautionDeposit = {
                     paid: false,
-                    amount: 2000,
+                    amount: 0,
                     paidBy: { personId: '', name: '', role: '', phone: '', roomNumber: '' },
                     paymentMode: 'Cash',
                     receiptNo: '',
@@ -1261,7 +1261,7 @@ router.delete('/caution-deposit', verifyToken, requireAdmin, async (req, res) =>
             }
             coach.cautionDeposit = {
                 paid: false,
-                amount: 2000,
+                amount: 0,
                 paidBy: { personId: '', name: '', role: 'Coach', phone: '', roomNumber: '' },
                 paymentMode: 'Cash',
                 receiptNo: '',
@@ -1286,7 +1286,7 @@ router.delete('/caution-deposit', verifyToken, requireAdmin, async (req, res) =>
 
         registration.cautionDeposit = {
             paid: false,
-            amount: 2000,
+            amount: 0,
             paidBy: { personId: '', name: '', role: '', phone: '', roomNumber: '' },
             paymentMode: 'Cash',
             receiptNo: '',
