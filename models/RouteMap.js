@@ -15,8 +15,11 @@ const routeMapSchema = new mongoose.Schema({
     },
     mapImage: {
         type: String,
-        default: '' // path or URL e.g. /uploads/routemap/routemap-xxx.jpg
+        default: '' // primary/fallback path e.g. /uploads/routemap/routemap-xxx.jpg
     },
+    mapImages: [{
+        type: String
+    }],
     updatedBy: {
         type: String,
         default: 'Super Admin'

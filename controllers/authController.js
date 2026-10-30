@@ -356,7 +356,10 @@ exports.getAccommodationDetails = async (req, res) => {
         }
 
         if (!building || !roomNumber) {
-            return res.status(404).json({ message: 'Accommodation not allocated yet' });
+            return res.status(200).json({ 
+                allocated: false, 
+                message: 'Accommodation not allocated yet' 
+            });
         }
 
         // Find roommates
