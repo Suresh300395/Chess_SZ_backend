@@ -26,6 +26,11 @@ app.use(helmet({
 
 connectDB().then(() => {
     authController.seedAdmin();
+    // Auto-remove deprecated mapImage field from RouteMap collection
+    const RouteMap = require('./models/RouteMap');
+    RouteMap.updateMany({ mapImage: { $exists: true } }, { $unset: { mapImage: 1 } }).catch(err => {
+        console.error('Error cleaning up mapImage from DB:', err.message);
+    });
 });
 
 // Secure CORS - only allow frontend origin

@@ -5,7 +5,7 @@ const path = require('path');
 const RouteMap = require('../models/RouteMap');
 const { verifyToken, requireSuperAdmin } = require('../Modules/authMiddleware');
 
-// Helper to format mapImage to full URL for clients
+// Helper to format map image to full URL for clients
 const formatImageUrl = (req, imgPath) => {
     if (!imgPath) return '';
     if (imgPath.startsWith('http://') || imgPath.startsWith('https://') || imgPath.startsWith('data:')) {
@@ -25,17 +25,16 @@ router.get('/', async (req, res) => {
                 title: 'Aditya University Campus Route Map',
                 description: 'Directions and travel routes to Aditya University, Surampalem.',
                 directions: 'Nearest Railway Station: Samalkot Junction (15 km)\nNearest Airport: Rajahmundry Airport (60 km)\nFrequent buses available from Kakinada and Rajahmundry.',
-                mapImage: '',
                 mapImages: []
             };
             return res.status(200).json(routeMap);
         }
 
         const formatted = routeMap.toObject();
-        if (!Array.isArray(formatted.mapImages) || formatted.mapImages.length === 0) {
-            formatted.mapImages = formatted.mapImage ? [formatted.mapImage] : [];
+        if (!Array.isArray(formatted.mapImages)) {
+            formatted.mapImages = [];
         }
-        formatted.fullImageUrl = formatImageUrl(req, formatted.mapImage);
+        delete formatted.mapImage;
         formatted.fullImageUrls = formatted.mapImages.map(img => formatImageUrl(req, img));
         res.status(200).json(formatted);
     } catch (error) {
@@ -91,7 +90,7 @@ router.put('/', verifyToken, requireSuperAdmin, async (req, res) => {
             }
 
             // Clean up removed image files from disk
-            const prevImages = [...(routeMap.mapImages || []), routeMap.mapImage].filter(Boolean);
+            const prevImages = Array.isArray(routeMap.mapImages) ? routeMap.mapImages : [];
             for (const oldImg of prevImages) {
                 if (oldImg.startsWith('/uploads/routemap/') && !finalImages.includes(oldImg)) {
                     const oldFilePath = path.join(__dirname, '../public', oldImg);
@@ -102,7 +101,6 @@ router.put('/', verifyToken, requireSuperAdmin, async (req, res) => {
             }
 
             routeMap.mapImages = finalImages;
-            routeMap.mapImage = finalImages[0] || '';
         } else if (typeof imageBase64 === 'string' && imageBase64.startsWith('data:image/')) {
             // Legacy single image update
             let ext = 'jpg';
@@ -115,22 +113,17 @@ router.put('/', verifyToken, requireSuperAdmin, async (req, res) => {
             const fileName = `routemap-${Date.now()}.${ext}`;
             const targetFilePath = path.join(uploadDir, fileName);
 
-            // Clean up previous image
-            if (routeMap.mapImage && routeMap.mapImage.startsWith('/uploads/routemap/')) {
-                const oldFilePath = path.join(__dirname, '../public', routeMap.mapImage);
-                if (fs.existsSync(oldFilePath)) {
-                    try { fs.unlinkSync(oldFilePath); } catch (e) { /* ignore */ }
-                }
-            }
-
             await fs.promises.writeFile(targetFilePath, buffer);
             const savedPath = `/uploads/routemap/${fileName}`;
-            routeMap.mapImage = savedPath;
             routeMap.mapImages = [savedPath];
         }
 
         routeMap.updatedBy = req.user?.username || 'Super Admin';
+        routeMap.set('mapImage', undefined, { strict: false });
         await routeMap.save();
+
+        // Ensure mapImage is completely unset in MongoDB
+        await RouteMap.updateOne({ _id: routeMap._id }, { $unset: { mapImage: 1 } });
 
         // Emit real-time socket notification
         try {
@@ -140,10 +133,10 @@ router.put('/', verifyToken, requireSuperAdmin, async (req, res) => {
         }
 
         const formatted = routeMap.toObject();
-        if (!Array.isArray(formatted.mapImages) || formatted.mapImages.length === 0) {
-            formatted.mapImages = formatted.mapImage ? [formatted.mapImage] : [];
+        delete formatted.mapImage;
+        if (!Array.isArray(formatted.mapImages)) {
+            formatted.mapImages = [];
         }
-        formatted.fullImageUrl = formatImageUrl(req, formatted.mapImage);
         formatted.fullImageUrls = formatted.mapImages.map(img => formatImageUrl(req, img));
 
         res.status(200).json({
@@ -161,7 +154,7 @@ router.delete('/', verifyToken, requireSuperAdmin, async (req, res) => {
     try {
         const routeMap = await RouteMap.findOne().sort({ updatedAt: -1 });
         if (routeMap) {
-            const allImages = [...(routeMap.mapImages || []), routeMap.mapImage].filter(Boolean);
+            const allImages = Array.isArray(routeMap.mapImages) ? routeMap.mapImages : [];
             for (const img of allImages) {
                 if (img.startsWith('/uploads/routemap/')) {
                     const oldFilePath = path.join(__dirname, '../public', img);
@@ -170,9 +163,10 @@ router.delete('/', verifyToken, requireSuperAdmin, async (req, res) => {
                     }
                 }
             }
-            routeMap.mapImage = '';
             routeMap.mapImages = [];
+            routeMap.set('mapImage', undefined, { strict: false });
             await routeMap.save();
+            await RouteMap.updateOne({ _id: routeMap._id }, { $unset: { mapImage: 1 } });
         }
 
         try {

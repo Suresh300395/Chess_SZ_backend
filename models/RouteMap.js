@@ -13,10 +13,6 @@ const routeMapSchema = new mongoose.Schema({
         type: String,
         default: ''
     },
-    mapImage: {
-        type: String,
-        default: '' // primary/fallback path e.g. /uploads/routemap/routemap-xxx.jpg
-    },
     mapImages: [{
         type: String
     }],

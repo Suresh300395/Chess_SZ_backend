@@ -40,6 +40,16 @@ const userSchema = new mongoose.Schema({
     participantType: {
         type: String,
         enum: ['player', 'coach']
+    },
+    resetOtp: {
+        otp: { type: String, default: null },
+        expiresAt: { type: Date, default: null },
+        attempts: { type: Number, default: 0 },
+        resendCount: { type: Number, default: 0 },
+        lastSentAt: { type: Date, default: null },
+        verifiedAt: { type: Date, default: null },
+        resetToken: { type: String, default: null },
+        resetTokenExpiresAt: { type: Date, default: null }
     }
 }, { timestamps: true });
 
