@@ -38,14 +38,19 @@ const generateToken = (user) => {
 exports.login = async (req, res) => {
     const { username, password } = req.body;
     if (!username || !password) {
-        return res.status(400).json({ message: 'Username and password are required' });
+        return res.status(400).json({ message: 'Username/Mobile and password are required' });
     }
+    const cleanIdentifier = String(username).trim();
     try {
-        let user = await Admin.findOne({ username });
+        let user = await Admin.findOne({
+            $or: [{ username: cleanIdentifier }, { mobile: cleanIdentifier }]
+        });
         let isUserAdmin = true;
 
         if (!user) {
-            user = await User.findOne({ username });
+            user = await User.findOne({
+                $or: [{ username: cleanIdentifier }, { mobile: cleanIdentifier }]
+            });
             isUserAdmin = false;
         }
 

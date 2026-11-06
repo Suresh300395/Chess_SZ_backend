@@ -3,6 +3,7 @@ const router = express.Router();
 const rateLimit = require('express-rate-limit');
 const authController = require('../controllers/authController');
 const passwordResetController = require('../controllers/passwordResetController');
+const smsController = require('../controllers/smsController');
 const { verifyToken, requireAdmin, requireSuperAdmin } = require('../Modules/authMiddleware');
 
 const loginLimiter = rateLimit({
@@ -71,6 +72,7 @@ router.put('/profile-photo', verifyToken, authController.updateProfilePhoto);
 router.put('/change-password', verifyToken, authController.changePassword);
 router.get('/accommodation-details', verifyToken, authController.getAccommodationDetails);
 router.get('/food-token-details', verifyToken, authController.getFoodTokenDetails);
+router.post('/send-test-sms', verifyToken, requireAdmin, smsController.sendTestSms);
 
 // Protected: only superadmin can manage admins
 router.post('/register-admin', verifyToken, requireSuperAdmin, authController.registerAdmin);

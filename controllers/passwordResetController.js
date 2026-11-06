@@ -179,11 +179,13 @@ exports.forgotPassword = async (req, res) => {
             await account.save();
 
             const remainingMinutes = Math.max(1, Math.ceil((new Date(account.resetOtp.expiresAt) - now) / 60000));
+            const accountName = account.name || account.username || 'User';
             await sendOtpNotification({
                 recipient: parsed.clean,
                 recipientType: 'mobile',
                 otp: sameOtp,
-                validityMinutes: remainingMinutes
+                validityMinutes: remainingMinutes,
+                name: accountName
             });
 
             return res.status(200).json({
@@ -207,11 +209,13 @@ exports.forgotPassword = async (req, res) => {
             };
             await account.save();
 
+            const accountName = account.name || account.username || 'User';
             await sendOtpNotification({
                 recipient: parsed.clean,
                 recipientType: 'mobile',
                 otp: newOtp,
-                validityMinutes: 5
+                validityMinutes: 5,
+                name: accountName
             });
 
             return res.status(200).json({

@@ -6,6 +6,7 @@
  */
 
 const APP_NAME = process.env.APP_NAME || 'National Sports Championship Portal';
+const smsController = require('../controllers/smsController');
 
 /**
  * Generate HTML email template for Password Reset OTP.
@@ -203,14 +204,26 @@ async function sendEmail({ to, subject, html, text }) {
 }
 
 /**
- * Send an SMS via configured provider (Twilio / Fast2SMS / dev mock).
+ * Send an SMS via configured provider (VISPL / Twilio / Fast2SMS / dev mock).
  */
-async function sendSms({ to, message, otp }) {
+async function sendSms({ to, message, otp, name }) {
+    // 1. Primary: VISPL SMS Gateway API
+    const visplUser = process.env.SMS_USERNAME;
+    const visplPass = process.env.SMS_PASSWORD;
+    if (visplUser && visplPass) {
+        try {
+            return await smsController.sendSms({ to, text: message, otp, name });
+        } catch (visplErr) {
+            console.error('[NotificationService] VISPL gateway delivery failed:', visplErr.message);
+            // continue to fallbacks if configured
+        }
+    }
+
     const twilioSid = process.env.TWILIO_ACCOUNT_SID;
     const twilioAuth = process.env.TWILIO_AUTH_TOKEN;
     const twilioFrom = process.env.TWILIO_FROM_NUMBER;
 
-    // 1. Twilio REST API
+    // 2. Twilio REST API
     if (twilioSid && twilioAuth && twilioFrom) {
         const auth = Buffer.from(`${twilioSid}:${twilioAuth}`).toString('base64');
         const params = new URLSearchParams();
@@ -234,7 +247,7 @@ async function sendSms({ to, message, otp }) {
         return { success: true, channel: 'twilio' };
     }
 
-    // 2. Fast2SMS API
+    // 3. Fast2SMS API
     if (process.env.FAST2SMS_API_KEY) {
         const res = await fetch('https://www.fast2sms.com/dev/bulkV2', {
             method: 'POST',
@@ -256,7 +269,7 @@ async function sendSms({ to, message, otp }) {
         return { success: true, channel: 'fast2sms' };
     }
 
-    // 3. Fallback for development / mock testing
+    // 4. Fallback for development / mock testing
     if (process.env.NODE_ENV !== 'production') {
         console.log(`[NotificationService] [DEV/TEST] SMS dispatched to: ${to}`);
         if (process.env.LOG_OTP_FOR_DEV === 'true') {
@@ -272,7 +285,7 @@ async function sendSms({ to, message, otp }) {
 /**
  * Main dispatcher to send OTP to user via email or SMS.
  */
-async function sendOtpNotification({ recipient, recipientType, otp, validityMinutes = 5 }) {
+async function sendOtpNotification({ recipient, recipientType, otp, validityMinutes = 5, name = 'User' }) {
     if (recipientType === 'email') {
         const template = generateOtpEmailTemplate(otp, validityMinutes);
         return await sendEmail({
@@ -282,11 +295,12 @@ async function sendOtpNotification({ recipient, recipientType, otp, validityMinu
             html: template.html
         });
     } else {
-        const message = `Your password reset code for ${APP_NAME} is ${otp}. Valid for ${validityMinutes} minutes. Never share this OTP with anyone.`;
+        const message = smsController.formatOtpMessage(otp, name);
         return await sendSms({
             to: recipient,
             message,
-            otp
+            otp,
+            name
         });
     }
 }
