@@ -1,4 +1,18 @@
+const mongoose = require('mongoose');
 const HostelBlock = require('../models/HostelBlock');
+
+const emitBlockUpdate = () => {
+    try {
+        const socket = require('../socket');
+        const io = socket.getIO();
+        if (io) {
+            io.emit('blocks_updated');
+            io.emit('dataUpdated');
+        }
+    } catch (e) {
+        // Socket optional
+    }
+};
 
 exports.addBlock = async (req, res) => {
     try {
@@ -19,6 +33,7 @@ exports.addBlock = async (req, res) => {
         });
 
         await newBlock.save();
+        emitBlockUpdate();
         res.status(201).json({ message: 'Block added successfully', block: newBlock });
     } catch (error) {
         console.error('Error adding block:', error);
@@ -45,6 +60,7 @@ exports.deleteBlock = async (req, res) => {
             return res.status(404).json({ message: 'Block not found' });
         }
 
+        emitBlockUpdate();
         res.status(200).json({ message: 'Block deleted successfully' });
     } catch (error) {
         console.error('Error deleting block:', error);
@@ -74,6 +90,7 @@ exports.updateBlock = async (req, res) => {
         if (!updatedBlock) {
              return res.status(404).json({ message: 'Block not found' });
         }
+        emitBlockUpdate();
         res.json({ message: 'Block updated successfully', block: updatedBlock });
     } catch (error) {
         console.error('Error updating block:', error);
@@ -134,4 +151,92 @@ exports.updateGuidelines = async (req, res) => {
         res.status(500).json({ message: 'Server Error', error: error.message });
     }
 };
+
+const HostelCategory = require('../models/HostelCategory');
+
+const DEFAULT_CATEGORIES = ['Boys Hostel', 'Girls Hostel', 'Staff Hostel', 'Guest House'];
+
+// Metadata model to track one-time initial seed
+const hostelCategoryMetaSchema = new mongoose.Schema({
+    key: { type: String, unique: true },
+    value: mongoose.Schema.Types.Mixed
+}, { collection: 'hostel_category_meta' });
+
+const HostelCategoryMeta = mongoose.models.HostelCategoryMeta || mongoose.model('HostelCategoryMeta', hostelCategoryMetaSchema);
+
+exports.initCategories = async () => {
+    try {
+        const meta = await HostelCategoryMeta.findOne({ key: 'categories_seeded' });
+        if (!meta) {
+            const count = await HostelCategory.countDocuments();
+            if (count === 0) {
+                const existingBlockCategories = await HostelBlock.distinct('block');
+                const allDefaults = Array.from(new Set([...DEFAULT_CATEGORIES, ...existingBlockCategories.filter(Boolean)]));
+                if (allDefaults.length > 0) {
+                    const docs = allDefaults.map(name => ({ name }));
+                    await HostelCategory.insertMany(docs, { ordered: false });
+                }
+            }
+            await HostelCategoryMeta.create({ key: 'categories_seeded', value: true });
+        }
+    } catch (err) {
+        console.error('Error initializing categories:', err.message);
+    }
+};
+
+exports.getCategories = async (req, res) => {
+    try {
+        const categories = await HostelCategory.find().sort({ createdAt: 1 });
+        res.status(200).json(categories);
+    } catch (error) {
+        console.error('Error fetching block categories:', error);
+        res.status(500).json({ message: 'Server Error', error: error.message });
+    }
+};
+
+exports.addCategory = async (req, res) => {
+    try {
+        const { name } = req.body;
+        if (!name || !name.trim()) {
+            return res.status(400).json({ message: 'Category name is required' });
+        }
+        const trimmedName = name.trim();
+
+        const escaped = trimmedName.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+        const existing = await HostelCategory.findOne({
+            name: { $regex: new RegExp(`^${escaped}$`, 'i') }
+        });
+
+        if (existing) {
+            return res.status(400).json({ message: 'A category with this name already exists' });
+        }
+
+        const newCat = new HostelCategory({ name: trimmedName });
+        await newCat.save();
+        emitBlockUpdate();
+
+        res.status(201).json({ message: 'Category added successfully', category: newCat });
+    } catch (error) {
+        console.error('Error adding category:', error);
+        res.status(500).json({ message: 'Server Error', error: error.message });
+    }
+};
+
+exports.deleteCategory = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const category = await HostelCategory.findById(id);
+        if (!category) {
+            return res.status(404).json({ message: 'Category not found' });
+        }
+
+        await HostelCategory.findByIdAndDelete(id);
+        emitBlockUpdate();
+        res.status(200).json({ message: 'Category deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting category:', error);
+        res.status(500).json({ message: 'Server Error', error: error.message });
+    }
+};
+
 

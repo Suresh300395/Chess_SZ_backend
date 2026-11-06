@@ -9,8 +9,8 @@ const playerSchema = new mongoose.Schema({
     transportNumber: { type: String },
     arrivalDate: { type: String, required: true },
     arrivalTime: { type: String, required: true },
-    departureDate: { type: String, required: true },
-    departureTime: { type: String, required: true },
+    departureDate: { type: String, default: '' },
+    departureTime: { type: String, default: '' },
     accommodation: { type: String, required: true },
     roomAllocation: {
         building: { type: String },

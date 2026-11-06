@@ -26,6 +26,10 @@ app.use(helmet({
 
 connectDB().then(() => {
     authController.seedAdmin();
+    const blockController = require('./controllers/blockController');
+    if (typeof blockController.initCategories === 'function') {
+        blockController.initCategories();
+    }
     // Auto-remove deprecated mapImage field from RouteMap collection
     const RouteMap = require('./models/RouteMap');
     RouteMap.updateMany({ mapImage: { $exists: true } }, { $unset: { mapImage: 1 } }).catch(err => {

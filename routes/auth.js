@@ -65,6 +65,7 @@ router.post('/reset-password', resetPasswordLimiter, passwordResetController.res
 router.post('/resend-reset-otp', resendOtpLimiter, passwordResetController.resendResetOtp);
 
 // Protected: logged-in user dashboard and credentials
+router.get('/me', verifyToken, authController.getMe);
 router.get('/dashboard', verifyToken, authController.getDashboard);
 router.put('/profile-photo', verifyToken, authController.updateProfilePhoto);
 router.put('/change-password', verifyToken, authController.changePassword);

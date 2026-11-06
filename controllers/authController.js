@@ -81,7 +81,8 @@ exports.login = async (req, res) => {
                 username: user.username,
                 role: user.role,
                 name: user.name || null,
-                photo: formatPhotoUrl(req, user.photo)
+                photo: formatPhotoUrl(req, user.photo),
+                allowedModules: user.allowedModules || []
             }
         });
     } catch (error) {
@@ -546,8 +547,30 @@ exports.getFoodTokenDetails = async (req, res) => {
     }
 };
 
+exports.getMe = async (req, res) => {
+    try {
+        let user = await Admin.findById(req.user.id).select('-password -__v');
+        if (!user) {
+            user = await User.findById(req.user.id).select('-password -__v');
+        }
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+        res.status(200).json({
+            id: user._id,
+            username: user.username,
+            role: user.role,
+            name: user.name || null,
+            photo: formatPhotoUrl(req, user.photo),
+            allowedModules: user.allowedModules || []
+        });
+    } catch (error) {
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
 exports.registerAdmin = async (req, res) => {
-    const { username, password, mobile } = req.body;
+    const { username, password, mobile, allowedModules } = req.body;
     if (!username || !password) {
         return res.status(400).json({ message: 'Username and password are required' });
     }
@@ -557,10 +580,14 @@ exports.registerAdmin = async (req, res) => {
             return res.status(400).json({ message: 'Username already exists' });
         }
 
-        const newUser = await Admin.create({ username, password, mobile, role: 'admin' });
+        const modules = Array.isArray(allowedModules) ? allowedModules : [];
+        const newUser = await Admin.create({ username, password, mobile, role: 'admin', allowedModules: modules });
+        try {
+            require('../socket').getIO().emit('admins_updated');
+        } catch (e) {}
         res.status(201).json({
             message: 'Admin created successfully',
-            user: { id: newUser._id, username: newUser.username, role: newUser.role }
+            user: { id: newUser._id, username: newUser.username, role: newUser.role, allowedModules: newUser.allowedModules }
         });
     } catch (error) {
         console.error('Register admin error:', error);
@@ -579,23 +606,29 @@ exports.getAdmins = async (req, res) => {
 
 exports.updateAdmin = async (req, res) => {
     const { id } = req.params;
-    const { username, password, mobile } = req.body;
+    const { username, password, mobile, allowedModules } = req.body;
     try {
         const admin = await Admin.findById(id);
         if (!admin) {
             return res.status(404).json({ message: 'Admin not found' });
         }
 
-        admin.username = username || admin.username;
-        admin.mobile = mobile || admin.mobile;
+        if (username) admin.username = username;
+        if (mobile !== undefined) admin.mobile = mobile;
+        if (Array.isArray(allowedModules)) {
+            admin.allowedModules = allowedModules;
+        }
         if (password) {
             admin.password = password; // will be auto-hashed by pre-save hook
         }
 
         await admin.save();
+        try {
+            require('../socket').getIO().emit('admins_updated');
+        } catch (e) {}
         res.status(200).json({
             message: 'Admin updated successfully',
-            user: { id: admin._id, username: admin.username, mobile: admin.mobile, role: admin.role }
+            user: { id: admin._id, username: admin.username, mobile: admin.mobile, role: admin.role, allowedModules: admin.allowedModules || [] }
         });
     } catch (error) {
         if (error.code === 11000) {
@@ -612,6 +645,9 @@ exports.deleteAdmin = async (req, res) => {
         if (!admin) {
             return res.status(404).json({ message: 'Admin not found' });
         }
+        try {
+            require('../socket').getIO().emit('admins_updated');
+        } catch (e) {}
         res.status(200).json({ message: 'Admin deleted successfully' });
     } catch (error) {
         res.status(500).json({ message: 'Server error', error: error.message });

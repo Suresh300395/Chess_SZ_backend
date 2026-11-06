@@ -29,6 +29,9 @@ const adminSchema = new mongoose.Schema({
         type: String,
         default: ''
     },
+    allowedModules: [{
+        type: String
+    }],
     resetOtp: {
         otp: { type: String, default: null },
         expiresAt: { type: Date, default: null },

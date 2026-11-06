@@ -255,8 +255,8 @@ router.post('/', registrationLimiter, async (req, res) => {
                 if ((p.transportMode === 'Train' || p.transportMode === 'Flight') && !p.transportNumber) {
                     return res.status(400).json({ error: `New Player ${i + 1}: ${p.transportMode} number is required` });
                 }
-                if (!p.arrivalDate || !p.arrivalTime || !p.departureDate || !p.departureTime) {
-                    return res.status(400).json({ error: `New Player ${i + 1}: Arrival and departure dates and times are required` });
+                if (!p.arrivalDate || !p.arrivalTime) {
+                    return res.status(400).json({ error: `New Player ${i + 1}: Arrival date and time are required` });
                 }
             }
 
@@ -563,8 +563,8 @@ router.post('/', registrationLimiter, async (req, res) => {
                 if ((p.transportMode === 'Train' || p.transportMode === 'Flight') && !p.transportNumber) {
                     return res.status(400).json({ error: `Player ${i + 1}: ${p.transportMode} number is required` });
                 }
-                if (!p.arrivalDate || !p.arrivalTime || !p.departureDate || !p.departureTime) {
-                    return res.status(400).json({ error: `Player ${i + 1}: Arrival and departure dates and times are required` });
+                if (!p.arrivalDate || !p.arrivalTime) {
+                    return res.status(400).json({ error: `Player ${i + 1}: Arrival date and time are required` });
                 }
             }
         }
@@ -855,7 +855,17 @@ router.put('/assign-room', verifyToken, requireAdmin, async (req, res) => {
             return res.status(400).json({ message: 'Missing required fields for room allocation' });
         }
 
-        // Verify capacity across all registrations (max 4 per room)
+        // Verify capacity dynamically from block definition (default 4 per room)
+        let roomCapacity = 4;
+        try {
+            const blockObj = await HostelBlock.findOne({ name: building });
+            if (blockObj && blockObj.capacityPerRoom) {
+                roomCapacity = blockObj.capacityPerRoom;
+            }
+        } catch (e) {
+            console.error('Error fetching block capacity:', e);
+        }
+
         const allRegistrations = await Registration.find({});
         let currentOccupants = 0;
 
@@ -884,8 +894,8 @@ router.put('/assign-room', verifyToken, requireAdmin, async (req, res) => {
             }
         });
 
-        if (currentOccupants >= 4) {
-            return res.status(400).json({ message: 'This room has reached maximum capacity of 4 members.' });
+        if (currentOccupants >= roomCapacity) {
+            return res.status(400).json({ message: `This room has reached maximum capacity of ${roomCapacity} members.` });
         }
 
         const allocationData = {

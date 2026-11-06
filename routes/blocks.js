@@ -6,9 +6,17 @@ const {
     deleteBlock, 
     updateBlock,
     getGuidelines,
-    updateGuidelines
+    updateGuidelines,
+    getCategories,
+    addCategory,
+    deleteCategory
 } = require('../controllers/blockController');
 const { verifyToken, requireAdmin } = require('../Modules/authMiddleware');
+
+// Category routes
+router.get('/categories', getCategories);
+router.post('/categories', verifyToken, requireAdmin, addCategory);
+router.delete('/categories/:id', verifyToken, requireAdmin, deleteCategory);
 
 // Public read routes
 router.get('/guidelines', getGuidelines);
