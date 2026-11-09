@@ -51,12 +51,14 @@ exports.getPeople = async (req, res) => {
             const teamArrivalDates = (reg.players || []).map(p => p.arrivalDate).filter(Boolean).sort();
             const teamDepartureDates = (reg.players || []).map(p => p.departureDate).filter(Boolean).sort();
             const fallbackArrival = teamArrivalDates[0] || '';
-            const fallbackDeparture = teamDepartureDates[teamDepartureDates.length - 1] || fallbackArrival;
+            const fallbackDeparture = teamDepartureDates[teamDepartureDates.length - 1] || '';
 
             // Process Players
             if (Array.isArray(reg.players)) {
                 for (const player of reg.players) {
                     if (!search || searchRegex.test(player.playerName) || searchRegex.test(player.mobileNo) || searchRegex.test(reg.universityName)) {
+                        const rawDeparture = (player.departureDate || '').trim();
+                        const hasDep = Boolean(rawDeparture);
                         people.push({
                             personType: 'PLAYER',
                             personRef: player._id,
@@ -68,8 +70,9 @@ exports.getPeople = async (req, res) => {
                             gender: player.gender || '',
                             arrivalDate: player.arrivalDate || fallbackArrival,
                             arrivalTime: player.arrivalTime || '',
-                            departureDate: player.departureDate || fallbackDeparture,
-                            departureTime: player.departureTime || '',
+                            departureDate: rawDeparture,
+                            departureTime: (player.departureTime || '').trim(),
+                            hasDepartureDate: hasDep,
                             block: player.roomAllocation?.building || '',
                             room: player.roomAllocation?.roomNumber || '',
                             floor: player.roomAllocation?.floor || ''
@@ -84,6 +87,7 @@ exports.getPeople = async (req, res) => {
                     if (!search || searchRegex.test(coach.name) || searchRegex.test(coach.mobileNo) || searchRegex.test(reg.universityName)) {
                         const roleUpper = (coach.role || '').toUpperCase();
                         const isManager = roleUpper.includes('MANAGER');
+                        const hasDep = Boolean(fallbackDeparture);
                         people.push({
                             personType: isManager ? 'MANAGER' : 'COACH',
                             personRef: coach._id,
@@ -95,6 +99,8 @@ exports.getPeople = async (req, res) => {
                             gender: coach.gender || '',
                             arrivalDate: fallbackArrival,
                             departureDate: fallbackDeparture,
+                            departureTime: '',
+                            hasDepartureDate: hasDep,
                             block: coach.roomAllocation?.building || '',
                             room: coach.roomAllocation?.roomNumber || '',
                             floor: coach.roomAllocation?.floor || ''
@@ -200,6 +206,16 @@ exports.issueToken = async (req, res) => {
             const player = reg.players?.find(p => p._id.toString() === personRef.toString());
             const coach = reg.coaches?.find(c => c._id.toString() === personRef.toString());
             const person = player || coach;
+            if (!person) {
+                return res.status(404).json({ message: 'Participant not found in registration' });
+            }
+
+            const personDeparture = player ? (player.departureDate || '').trim() : ((reg.players || []).map(p => p.departureDate).filter(Boolean).sort().pop() || '');
+            if (!personDeparture) {
+                return res.status(400).json({
+                    message: `Cannot issue token for ${person.playerName || person.name}: Departure date is missing. Please enter departure details first.`
+                });
+            }
 
             snapshot = {
                 name: person.playerName || person.name,
@@ -490,12 +506,46 @@ exports.issueBulk = async (req, res) => {
                 status: { $ne: 'CANCELLED' }
             }).lean();
 
-            const existingRefMap = new Set(existingTokens.map(t => t.personRef.toString()));
+            const existingRefMap = new Map();
+            existingTokens.forEach(t => existingRefMap.set(t.personRef.toString(), t));
 
             for (const person of participants) {
                 if (existingRefMap.has(person.personRef.toString())) {
                     totalSkipped++;
-                    continue; // Skip already issued
+                    const existingToken = existingRefMap.get(person.personRef.toString());
+
+                    // Update token print count & log reprint action
+                    await FoodToken.updateOne(
+                        { _id: existingToken._id },
+                        {
+                            $inc: { printCount: 1 },
+                            $set: { lastPrintedAt: new Date() },
+                            $push: {
+                                auditLog: {
+                                    action: 'REPRINT',
+                                    performedBy: req.user?.username || 'admin',
+                                    timestamp: new Date(),
+                                    details: `Bulk reprint for ${person.teamOrSport} (${currentDate} ${currentMeal})`
+                                }
+                            }
+                        }
+                    );
+
+                    printPayloads.push({
+                        code: existingToken.code,
+                        name: existingToken.name,
+                        identifier: existingToken.identifier,
+                        teamOrSport: existingToken.teamOrSport,
+                        block: existingToken.block,
+                        room: existingToken.room,
+                        eventName: existingToken.eventName,
+                        mealType: existingToken.mealType,
+                        mealDate: existingToken.mealDate,
+                        issuedAt: existingToken.issuedAt,
+                        isReprint: true,
+                        printCount: (existingToken.printCount || 1) + 1
+                    });
+                    continue; // Skip creating new, proceed with print
                 }
 
                 let codeCreated = false;
@@ -556,8 +606,27 @@ exports.issueBulk = async (req, res) => {
             emitSocketUpdate();
         }
 
+        // Sort printPayloads by participant name, then date, then mealType
+        printPayloads.sort((a, b) => {
+            const nameCmp = (a.name || '').localeCompare(b.name || '');
+            if (nameCmp !== 0) return nameCmp;
+            const dateCmp = (a.mealDate || '').localeCompare(b.mealDate || '');
+            if (dateCmp !== 0) return dateCmp;
+            const mealOrder = { BREAKFAST: 1, LUNCH: 2, DINNER: 3 };
+            return (mealOrder[a.mealType] || 0) - (mealOrder[b.mealType] || 0);
+        });
+
+        let message = '';
+        if (newlyIssued.length > 0 && totalSkipped > 0) {
+            message = `Issued ${newlyIssued.length} new tokens & reprinted ${totalSkipped} existing tokens (${printPayloads.length} sent to printer)`;
+        } else if (newlyIssued.length > 0) {
+            message = `Issued ${newlyIssued.length} tokens (${printPayloads.length} sent to printer)`;
+        } else {
+            message = `Tokens already issued. Sending all ${printPayloads.length} tokens to printer for reprint!`;
+        }
+
         res.status(200).json({
-            message: `Issued ${newlyIssued.length} tokens for ${participants.length} participant(s) (${totalSkipped} already existed)`,
+            message,
             issuedCount: newlyIssued.length,
             skippedCount: totalSkipped,
             totalTeamMembers: participants.length,
@@ -841,10 +910,12 @@ exports.cancelToken = async (req, res) => {
  */
 exports.getTokens = async (req, res) => {
     try {
-        const { mealType, mealDate, status, personType, search } = req.query;
+        const { mealType, mealDate, status, personType, search, all } = req.query;
         const page = parseInt(req.query.page, 10) || 1;
-        const limit = parseInt(req.query.limit, 10) || 20;
-        const skip = (page - 1) * limit;
+        const parsedLimit = req.query.limit !== undefined ? parseInt(req.query.limit, 10) : 20;
+        const isAll = all === 'true' || parsedLimit === 0;
+        const limit = isAll ? 0 : parsedLimit;
+        const skip = isAll ? 0 : (page - 1) * limit;
 
         const filter = {};
 
@@ -863,21 +934,22 @@ exports.getTokens = async (req, res) => {
             ];
         }
 
+        let query = FoodToken.find(filter).sort({ createdAt: -1 });
+        if (!isAll && limit > 0) {
+            query = query.skip(skip).limit(limit);
+        }
+
         const [tokens, total] = await Promise.all([
-            FoodToken.find(filter)
-                .sort({ createdAt: -1 })
-                .skip(skip)
-                .limit(limit)
-                .lean(),
+            query.lean(),
             FoodToken.countDocuments(filter)
         ]);
 
         res.status(200).json({
             tokens,
             total,
-            page,
-            limit,
-            totalPages: Math.ceil(total / limit)
+            page: isAll ? 1 : page,
+            limit: isAll ? total : limit,
+            totalPages: isAll ? 1 : Math.ceil(total / (limit || 1))
         });
     } catch (error) {
         console.error('Error in getTokens:', error);
@@ -891,22 +963,42 @@ exports.getTokens = async (req, res) => {
  */
 exports.getStats = async (req, res) => {
     try {
-        const { mealDate } = req.query;
+        const { mealDate, fromDate, toDate } = req.query;
 
-        // If a mealDate is specified in query, filter by it; otherwise aggregate across all tokens
+        // Build match stage: single date, date range, or no filter
         const matchStage = {};
         if (mealDate) {
             matchStage.mealDate = mealDate;
+        } else if (fromDate || toDate) {
+            matchStage.mealDate = {};
+            if (fromDate) matchStage.mealDate.$gte = fromDate;
+            if (toDate) matchStage.mealDate.$lte = toDate;
         }
 
-        const statsAgg = await FoodToken.aggregate([
-            ...(Object.keys(matchStage).length > 0 ? [{ $match: matchStage }] : []),
-            {
-                $group: {
-                    _id: { mealType: '$mealType', status: '$status' },
-                    count: { $sum: 1 }
+        const hasMatch = Object.keys(matchStage).length > 0;
+
+        const [statsAgg, dateAgg] = await Promise.all([
+            FoodToken.aggregate([
+                ...(hasMatch ? [{ $match: matchStage }] : []),
+                {
+                    $group: {
+                        _id: { mealType: '$mealType', status: '$status' },
+                        count: { $sum: 1 }
+                    }
                 }
-            }
+            ]),
+            FoodToken.aggregate([
+                ...(hasMatch ? [{ $match: matchStage }] : []),
+                {
+                    $group: {
+                        _id: { mealDate: '$mealDate', mealType: '$mealType', status: '$status' },
+                        count: { $sum: 1 }
+                    }
+                },
+                {
+                    $sort: { '_id.mealDate': 1 }
+                }
+            ])
         ]);
 
         // Build structured stats response
@@ -946,9 +1038,63 @@ exports.getStats = async (req, res) => {
             }
         }
 
+        // Build date-wise structured stats
+        const byDateMap = {};
+        for (const row of dateAgg) {
+            const { mealDate: d, mealType, status } = row._id;
+            if (!d) continue;
+
+            if (!byDateMap[d]) {
+                byDateMap[d] = {
+                    date: d,
+                    totalIssued: 0,
+                    totalRedeemed: 0,
+                    totalCancelled: 0,
+                    totalTokens: 0,
+                    breakfast: { issued: 0, redeemed: 0, total: 0 },
+                    lunch: { issued: 0, redeemed: 0, total: 0 },
+                    dinner: { issued: 0, redeemed: 0, total: 0 }
+                };
+            }
+
+            const dObj = byDateMap[d];
+            const count = row.count;
+            const mealKey = (mealType || '').toLowerCase();
+
+            if (status === 'ISSUED') {
+                dObj.totalIssued += count;
+                dObj.totalTokens += count;
+                if (dObj[mealKey]) {
+                    dObj[mealKey].issued += count;
+                    dObj[mealKey].total += count;
+                }
+            } else if (status === 'REDEEMED') {
+                dObj.totalRedeemed += count;
+                dObj.totalTokens += count;
+                if (dObj[mealKey]) {
+                    dObj[mealKey].redeemed += count;
+                    dObj[mealKey].total += count;
+                }
+            } else if (status === 'CANCELLED') {
+                dObj.totalCancelled += count;
+            } else {
+                dObj.totalIssued += count;
+                dObj.totalTokens += count;
+                if (dObj[mealKey]) {
+                    dObj[mealKey].issued += count;
+                    dObj[mealKey].total += count;
+                }
+            }
+        }
+
+        const byDate = Object.values(byDateMap).sort((a, b) => a.date.localeCompare(b.date));
+
         res.status(200).json({
             mealDate,
+            fromDate: fromDate || null,
+            toDate: toDate || null,
             byMeal: statsByMeal,
+            byDate,
             overall: {
                 totalIssued,
                 totalRedeemed,
@@ -1062,5 +1208,113 @@ exports.redeemToken = async (req, res) => {
     } catch (error) {
         console.error('Error in redeemToken:', error);
         res.status(500).json({ success: false, message: 'Failed to redeem token', error: error.message });
+    }
+};
+
+/**
+ * 11. Get all registered players with missing departure date & time
+ * GET /api/food-tokens/missing-departure
+ */
+exports.getMissingDeparturePlayers = async (req, res) => {
+    try {
+        const registrations = await Registration.find({
+            $or: [
+                { 'players.departureDate': { $in: [null, '', undefined] } },
+                { 'players.departureDate': { $exists: false } }
+            ]
+        }).lean();
+
+        const missing = [];
+        for (const reg of registrations) {
+            if (Array.isArray(reg.players)) {
+                for (const player of reg.players) {
+                    const depDate = (player.departureDate || '').trim();
+                    if (!depDate) {
+                        missing.push({
+                            registrationId: reg._id,
+                            playerRef: player._id,
+                            playerName: player.playerName,
+                            mobileNo: player.mobileNo,
+                            gender: player.gender || '',
+                            universityName: reg.universityName,
+                            arrivalDate: player.arrivalDate || '',
+                            arrivalTime: player.arrivalTime || '',
+                            departureDate: '',
+                            departureTime: player.departureTime || '',
+                            block: player.roomAllocation?.building || '',
+                            room: player.roomAllocation?.roomNumber || ''
+                        });
+                    }
+                }
+            }
+        }
+
+        // Sort by university then player name
+        missing.sort((a, b) => (a.universityName || '').localeCompare(b.universityName || '') || (a.playerName || '').localeCompare(b.playerName || ''));
+
+        res.status(200).json({
+            count: missing.length,
+            players: missing
+        });
+    } catch (error) {
+        console.error('Error in getMissingDeparturePlayers:', error);
+        res.status(500).json({ message: 'Failed to fetch players with missing departure', error: error.message });
+    }
+};
+
+/**
+ * 12. Update departure date and time for a player
+ * PUT /api/food-tokens/update-departure
+ */
+exports.updatePlayerDeparture = async (req, res) => {
+    try {
+        const { registrationId, playerRef, departureDate, departureTime } = req.body;
+
+        if (!playerRef || !departureDate || !departureDate.trim()) {
+            return res.status(400).json({ message: 'playerRef and departureDate are required' });
+        }
+
+        const cleanDate = departureDate.trim();
+        const cleanTime = (departureTime || '').trim();
+
+        let reg = null;
+        if (registrationId) {
+            reg = await Registration.findById(registrationId);
+        }
+        if (!reg) {
+            reg = await Registration.findOne({ 'players._id': playerRef });
+        }
+
+        if (!reg) {
+            return res.status(404).json({ message: 'Registration not found for player' });
+        }
+
+        const player = (reg.players.id ? reg.players.id(playerRef) : null) || (Array.isArray(reg.players) ? reg.players.find(p => String(p._id) === String(playerRef)) : null);
+        if (!player) {
+            return res.status(404).json({ message: 'Player not found in registration' });
+        }
+
+        player.departureDate = cleanDate;
+        if (cleanTime !== undefined) {
+            player.departureTime = cleanTime;
+        }
+
+        await reg.save();
+        emitSocketUpdate();
+
+        res.status(200).json({
+            success: true,
+            message: `Departure details updated successfully for ${player.playerName}!`,
+            player: {
+                registrationId: reg._id,
+                playerRef: player._id,
+                playerName: player.playerName,
+                departureDate: player.departureDate,
+                departureTime: player.departureTime
+            }
+        });
+    } catch (error) {
+        console.error('Error in updatePlayerDeparture:', error);
+        res.status(500).json({ message: 'Failed to update departure details', error: error.message });
     }
 };

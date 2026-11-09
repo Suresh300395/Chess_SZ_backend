@@ -65,4 +65,10 @@ router.get('/', foodTokenController.getTokens);
 // 8. Aggregated statistics by meal type and status for a date
 router.get('/stats', foodTokenController.getStats);
 
+// 9. Get registered players missing departure details
+router.get('/missing-departure', foodTokenController.getMissingDeparturePlayers);
+
+// 10. Update departure date and time for a player
+router.put('/update-departure', foodTokenController.updatePlayerDeparture);
+
 module.exports = router;
