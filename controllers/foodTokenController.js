@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const { FoodToken, generateSecureCode } = require('../models/FoodToken');
 const Registration = require('../models/Registration');
 const { MEAL_TYPES, EVENT_NAME, getTodayString } = require('../config/mealConfig');
