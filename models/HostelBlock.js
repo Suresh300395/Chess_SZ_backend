@@ -26,6 +26,14 @@ const hostelBlockSchema = new mongoose.Schema({
         type: String,
         trim: true
     },
+    incharge: {
+        type: String,
+        trim: true
+    },
+    inchargeContact: {
+        type: String,
+        trim: true
+    },
     officeHours: {
         type: String,
         trim: true

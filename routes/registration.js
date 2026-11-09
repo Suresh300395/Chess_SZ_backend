@@ -4,9 +4,12 @@ const router = express.Router();
 const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 const Registration = require('../models/Registration');
+const CautionDeposit = require('../models/CautionDeposit');
 const User = require('../models/User');
 const HostelBlock = require('../models/HostelBlock');
 const { verifyToken, requireAdmin } = require('../Modules/authMiddleware');
+const cryptoUtils = require('../utils/cryptoUtils');
+const smsController = require('../controllers/smsController');
 
 const registrationLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -1052,7 +1055,8 @@ router.put('/unassign-room', verifyToken, requireAdmin, async (req, res) => {
         if (updatedReg) {
             const hasAnyAllocated = (updatedReg.players || []).some(p => p.roomAllocation && p.roomAllocation.roomNumber) ||
                                     (updatedReg.coaches || []).some(c => c.roomAllocation && c.roomAllocation.roomNumber);
-            if (!hasAnyAllocated && updatedReg.cautionDeposit && updatedReg.cautionDeposit.paid) {
+            // Only reset caution deposit if it was NOT paid; paid deposits must be retained so admin can refund them upon vacating!
+            if (!hasAnyAllocated && updatedReg.cautionDeposit && !updatedReg.cautionDeposit.paid) {
                 updatedReg.cautionDeposit = {
                     paid: false,
                     amount: 0,
@@ -1080,7 +1084,7 @@ router.put('/unassign-room', verifyToken, requireAdmin, async (req, res) => {
     }
 });
 
-// Record manual caution deposit payment
+// Record manual caution deposit payment - Saves full record in CautionDeposit collection & syncs status to Registration
 router.put('/caution-deposit', verifyToken, requireAdmin, async (req, res) => {
     try {
         const { registrationId, universityName, coachId, paidBy, amount, paymentMode, notes, receiptNo } = req.body;
@@ -1124,7 +1128,52 @@ router.put('/caution-deposit', verifyToken, requireAdmin, async (req, res) => {
             if (!coach) {
                 return res.status(404).json({ message: 'Coach not found in registration' });
             }
-            coach.cautionDeposit = depositData;
+
+            // 1. Save / Update in separate CautionDeposit collection (with all detailed fields)
+            const cautionDoc = await CautionDeposit.findOneAndUpdate(
+                {
+                    registrationId: registration._id,
+                    targetType: 'Coach',
+                    coachId: coachId.toString()
+                },
+                {
+                    $set: {
+                        registrationId: registration._id,
+                        universityName: registration.universityName,
+                        targetType: 'Coach',
+                        coachId: coachId.toString(),
+                        paid: true,
+                        amount: depositData.amount,
+                        paidBy: depositData.paidBy,
+                        paymentMode: depositData.paymentMode,
+                        receiptNo: depositData.receiptNo,
+                        paidAt: depositData.paidAt,
+                        collectedBy: depositData.collectedBy,
+                        notes: depositData.notes,
+                        refundStatus: 'Refund Pending',
+                        refundedAmount: 0,
+                        refundedAt: null,
+                        rooms: coach.roomAllocation?.roomNumber ? [`Room ${coach.roomAllocation.roomNumber}`] : []
+                    }
+                },
+                { upsert: true, new: true }
+            );
+
+            // 2. Dynamically sync into Registration collection (maintains paid status, paidByName, depositId)
+            coach.cautionDeposit = {
+                paid: true,
+                paidByName: depositData.paidBy.name,
+                depositId: cautionDoc._id,
+                amount: depositData.amount,
+                paidBy: depositData.paidBy,
+                paymentMode: depositData.paymentMode,
+                receiptNo: depositData.receiptNo,
+                paidAt: depositData.paidAt,
+                collectedBy: depositData.collectedBy,
+                notes: depositData.notes,
+                refundStatus: 'Refund Pending',
+                refundedAmount: 0
+            };
             registration.markModified('coaches');
             await registration.save();
 
@@ -1133,7 +1182,8 @@ router.put('/caution-deposit', verifyToken, requireAdmin, async (req, res) => {
                 require('../socket').getIO().emit('caution_deposit_updated', {
                     universityName: registration.universityName,
                     coachId,
-                    cautionDeposit: depositData
+                    cautionDeposit: depositData,
+                    depositId: cautionDoc._id
                 });
             } catch (socketErr) {
                 console.error('Socket error in coach caution deposit update:', socketErr);
@@ -1142,19 +1192,68 @@ router.put('/caution-deposit', verifyToken, requireAdmin, async (req, res) => {
             return res.status(200).json({
                 message: `Caution deposit of ₹${depositData.amount} successfully recorded for Coach ${coach.name} (${registration.universityName})!`,
                 cautionDeposit: depositData,
-                coachId
+                coachId,
+                depositId: cautionDoc._id
             });
         }
 
-        // Team / Players Caution Deposit
-        registration.cautionDeposit = depositData;
+        // 1. Save / Update in separate CautionDeposit collection (with all detailed fields)
+        const teamRooms = (registration.players || [])
+            .map(p => p.roomAllocation?.roomNumber ? `Room ${p.roomAllocation.roomNumber}` : null)
+            .filter(Boolean);
+
+        const cautionDoc = await CautionDeposit.findOneAndUpdate(
+            {
+                registrationId: registration._id,
+                targetType: 'Team',
+                coachId: ''
+            },
+            {
+                $set: {
+                    registrationId: registration._id,
+                    universityName: registration.universityName,
+                    targetType: 'Team',
+                    coachId: '',
+                    paid: true,
+                    amount: depositData.amount,
+                    paidBy: depositData.paidBy,
+                    paymentMode: depositData.paymentMode,
+                    receiptNo: depositData.receiptNo,
+                    paidAt: depositData.paidAt,
+                    collectedBy: depositData.collectedBy,
+                    notes: depositData.notes,
+                    refundStatus: 'Refund Pending',
+                    refundedAmount: 0,
+                    refundedAt: null,
+                    rooms: Array.from(new Set(teamRooms))
+                }
+            },
+            { upsert: true, new: true }
+        );
+
+        // 2. Dynamically sync into Registration collection (maintains paid status, paidByName, depositId)
+        registration.cautionDeposit = {
+            paid: true,
+            paidByName: depositData.paidBy.name,
+            depositId: cautionDoc._id,
+            amount: depositData.amount,
+            paidBy: depositData.paidBy,
+            paymentMode: depositData.paymentMode,
+            receiptNo: depositData.receiptNo,
+            paidAt: depositData.paidAt,
+            collectedBy: depositData.collectedBy,
+            notes: depositData.notes,
+            refundStatus: 'Refund Pending',
+            refundedAmount: 0
+        };
         await registration.save();
 
         try {
             require('../socket').getIO().emit('dataUpdated');
             require('../socket').getIO().emit('caution_deposit_updated', {
                 universityName: registration.universityName,
-                cautionDeposit: depositData
+                cautionDeposit: depositData,
+                depositId: cautionDoc._id
             });
         } catch (socketErr) {
             console.error('Socket error in caution deposit update:', socketErr);
@@ -1162,7 +1261,8 @@ router.put('/caution-deposit', verifyToken, requireAdmin, async (req, res) => {
 
         res.status(200).json({
             message: `Caution deposit of ₹${depositData.amount} successfully recorded for ${registration.universityName}!`,
-            cautionDeposit: depositData
+            cautionDeposit: depositData,
+            depositId: cautionDoc._id
         });
     } catch (error) {
         console.error('Error recording caution deposit:', error);
@@ -1170,10 +1270,10 @@ router.put('/caution-deposit', verifyToken, requireAdmin, async (req, res) => {
     }
 });
 
-// Mark caution deposit as refunded
-router.put('/caution-deposit/refund', verifyToken, requireAdmin, async (req, res) => {
+// Send Refund OTP to the payer before initiating caution deposit refund
+router.post('/caution-deposit/send-refund-otp', verifyToken, requireAdmin, async (req, res) => {
     try {
-        const { registrationId, universityName, coachId, refundedAmount } = req.body;
+        const { registrationId, universityName, coachId } = req.body;
         let query = {};
         if (registrationId && mongoose.Types.ObjectId.isValid(registrationId)) {
             query._id = registrationId;
@@ -1188,6 +1288,172 @@ router.put('/caution-deposit/refund', verifyToken, requireAdmin, async (req, res
             return res.status(404).json({ message: 'Registration not found' });
         }
 
+        let recipientName = '';
+        let recipientPhone = '';
+        let targetType = 'Team';
+        let targetId = '';
+
+        if (coachId) {
+            targetType = 'Coach';
+            targetId = coachId.toString();
+            const coach = registration.coaches.id(coachId) || (registration.coaches || []).find(c => c._id.toString() === coachId.toString());
+            if (!coach) {
+                return res.status(404).json({ message: 'Coach not found' });
+            }
+            if (!coach.cautionDeposit || !coach.cautionDeposit.paid) {
+                return res.status(400).json({ message: 'Coach caution deposit has not been paid yet' });
+            }
+            if (coach.cautionDeposit.refundStatus === 'Refunded') {
+                return res.status(400).json({ message: 'Caution deposit has already been refunded' });
+            }
+            if (coach.roomAllocation && coach.roomAllocation.roomNumber) {
+                return res.status(400).json({ message: `Cannot process refund: Coach is still occupying Room ${coach.roomAllocation.roomNumber}. Room must be vacated first.` });
+            }
+
+            recipientName = coach.cautionDeposit?.paidBy?.name || coach.name || 'Coach';
+            recipientPhone = coach.cautionDeposit?.paidBy?.phone || coach.mobileNo || coach.phone || registration.universityContact;
+        } else {
+            if (!registration.cautionDeposit || !registration.cautionDeposit.paid) {
+                return res.status(400).json({ message: 'Caution deposit has not been paid yet' });
+            }
+            if (registration.cautionDeposit.refundStatus === 'Refunded') {
+                return res.status(400).json({ message: 'Caution deposit has already been refunded' });
+            }
+
+            const stillOccupiedPlayers = (registration.players || []).filter(p => p.roomAllocation && p.roomAllocation.roomNumber);
+            if (stillOccupiedPlayers.length > 0) {
+                return res.status(400).json({
+                    message: `Cannot process refund: ${stillOccupiedPlayers.length} team player(s) are still occupying room(s). All rooms must be vacated before refund.`
+                });
+            }
+
+            recipientName = registration.cautionDeposit.paidBy?.name || registration.cautionDeposit.paidByName || '';
+            recipientPhone = registration.cautionDeposit.paidBy?.phone || '';
+
+            // Try to find matching player phone if phone is missing
+            if (!recipientPhone && registration.cautionDeposit.paidBy?.personId) {
+                const player = (registration.players || []).find(p => p._id.toString() === registration.cautionDeposit.paidBy.personId.toString());
+                if (player) {
+                    recipientPhone = player.mobileNo || player.phone;
+                    if (!recipientName) recipientName = player.playerName;
+                }
+            }
+            if (!recipientPhone && recipientName) {
+                const player = (registration.players || []).find(p => (p.playerName || '').trim().toLowerCase() === recipientName.trim().toLowerCase());
+                if (player) {
+                    recipientPhone = player.mobileNo || player.phone;
+                }
+            }
+            if (!recipientPhone) {
+                recipientPhone = registration.universityContact || registration.managerContact;
+            }
+            if (!recipientName) {
+                recipientName = 'Team Representative';
+            }
+        }
+
+        const cleanDigits = String(recipientPhone || '').replace(/[\s\-()+]/g, '');
+        if (!cleanDigits || cleanDigits.length < 10) {
+            return res.status(400).json({
+                message: `Cannot send OTP: No valid 10-digit mobile number found for ${recipientName}. Please check contact details.`
+            });
+        }
+
+        const valid10Digits = cleanDigits.slice(-10);
+        const maskedPhone = `+91 ${valid10Digits.slice(0, 2)}****${valid10Digits.slice(-4)}`;
+
+        // Generate secure 6-digit OTP
+        const otp = cryptoUtils.generateSecureOtp();
+        const otpHash = cryptoUtils.hashOtp(otp);
+        const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+        // 1. Update in separate CautionDeposit collection
+        await CautionDeposit.findOneAndUpdate(
+            {
+                registrationId: registration._id,
+                targetType,
+                coachId: targetId
+            },
+            {
+                $set: {
+                    refundOtpHash: otpHash,
+                    refundOtpExpires: otpExpires,
+                    refundOtpSentTo: valid10Digits,
+                    refundOtpSentName: recipientName
+                }
+            }
+        );
+
+        // 2. Update in Registration collection
+        if (coachId) {
+            const coach = registration.coaches.id(coachId) || (registration.coaches || []).find(c => c._id.toString() === coachId.toString());
+            if (coach && coach.cautionDeposit) {
+                coach.cautionDeposit.refundOtpHash = otpHash;
+                coach.cautionDeposit.refundOtpExpires = otpExpires;
+                coach.cautionDeposit.refundOtpSentTo = valid10Digits;
+                coach.cautionDeposit.refundOtpSentName = recipientName;
+                registration.markModified('coaches');
+            }
+        } else {
+            registration.cautionDeposit.refundOtpHash = otpHash;
+            registration.cautionDeposit.refundOtpExpires = otpExpires;
+            registration.cautionDeposit.refundOtpSentTo = valid10Digits;
+            registration.cautionDeposit.refundOtpSentName = recipientName;
+        }
+        await registration.save();
+
+        // 3. Dispatch SMS via VISPL gateway
+        try {
+            await smsController.sendSms({
+                to: valid10Digits,
+                otp,
+                name: recipientName
+            });
+            console.log(`[CautionDeposit Refund] OTP ${otp} dispatched via SMS to ${valid10Digits} (${recipientName})`);
+        } catch (smsErr) {
+            console.error('[CautionDeposit Refund] SMS delivery error:', smsErr.message);
+        }
+
+        res.status(200).json({
+            ok: true,
+            message: `OTP sent successfully to ${recipientName} (${maskedPhone})`,
+            recipientName,
+            maskedPhone,
+            phone: valid10Digits,
+            expiresInSeconds: 600,
+            devOtp: (process.env.NODE_ENV !== 'production' || process.env.LOG_OTP_FOR_DEV === 'true') ? otp : undefined
+        });
+    } catch (error) {
+        console.error('Error generating refund OTP:', error);
+        res.status(500).json({ message: 'Failed to send refund OTP' });
+    }
+});
+
+// Mark caution deposit as refunded - Updates both CautionDeposit & Registration collections dynamically
+router.put('/caution-deposit/refund', verifyToken, requireAdmin, async (req, res) => {
+    try {
+        const { registrationId, universityName, coachId, refundedAmount, otp } = req.body;
+        let query = {};
+        if (registrationId && mongoose.Types.ObjectId.isValid(registrationId)) {
+            query._id = registrationId;
+        } else if (universityName) {
+            query.universityName = universityName;
+        } else {
+            return res.status(400).json({ message: 'Missing registrationId or universityName' });
+        }
+
+        if (!otp || typeof otp !== 'string' || !otp.trim()) {
+            return res.status(400).json({ message: 'Refund verification OTP is required' });
+        }
+
+        const registration = await Registration.findOne(query);
+        if (!registration) {
+            return res.status(404).json({ message: 'Registration not found' });
+        }
+
+        const now = new Date();
+        const adminName = req.user?.username || req.user?.name || 'Admin';
+
         if (coachId) {
             const coach = registration.coaches.id(coachId) || (registration.coaches || []).find(c => c._id.toString() === coachId.toString());
             if (!coach) {
@@ -1196,10 +1462,56 @@ router.put('/caution-deposit/refund', verifyToken, requireAdmin, async (req, res
             if (!coach.cautionDeposit || !coach.cautionDeposit.paid) {
                 return res.status(400).json({ message: 'Coach caution deposit has not been paid yet' });
             }
+            if (coach.roomAllocation && coach.roomAllocation.roomNumber) {
+                return res.status(400).json({ message: `Cannot process refund: Coach is still occupying Room ${coach.roomAllocation.roomNumber}. Room must be vacated first.` });
+            }
 
+            const storedHash = coach.cautionDeposit.refundOtpHash;
+            const expires = coach.cautionDeposit.refundOtpExpires;
+
+            if (!storedHash || !expires) {
+                return res.status(400).json({ message: 'No active refund OTP found. Please click "Refund" to generate a new OTP.' });
+            }
+            if (new Date() > new Date(expires)) {
+                return res.status(400).json({ message: 'OTP has expired. Please request a new OTP.' });
+            }
+
+            const isValid = cryptoUtils.verifyOtpHash(otp.trim(), storedHash);
+            if (!isValid) {
+                return res.status(400).json({ message: 'Invalid OTP. Please enter the correct 6-digit code received by the coach.' });
+            }
+
+            const refundAmt = Number(refundedAmount) || coach.cautionDeposit.amount || 2000;
+
+            // 1. Update in separate CautionDeposit collection
+            const updatedCaution = await CautionDeposit.findOneAndUpdate(
+                {
+                    registrationId: registration._id,
+                    targetType: 'Coach',
+                    coachId: coachId.toString()
+                },
+                {
+                    $set: {
+                        refundStatus: 'Refunded',
+                        refundedAt: now,
+                        refundedAmount: refundAmt,
+                        refundedBy: adminName,
+                        refundOtpHash: null,
+                        refundOtpExpires: null
+                    }
+                },
+                { new: true }
+            );
+
+            // 2. Dynamically sync into Registration collection
             coach.cautionDeposit.refundStatus = 'Refunded';
-            coach.cautionDeposit.refundedAt = new Date();
-            coach.cautionDeposit.refundedAmount = Number(refundedAmount) || coach.cautionDeposit.amount || 2000;
+            coach.cautionDeposit.refundedAt = now;
+            coach.cautionDeposit.refundedAmount = refundAmt;
+            coach.cautionDeposit.refundOtpHash = null;
+            coach.cautionDeposit.refundOtpExpires = null;
+            if (updatedCaution) {
+                coach.cautionDeposit.depositId = updatedCaution._id;
+            }
             registration.markModified('coaches');
             await registration.save();
 
@@ -1208,14 +1520,16 @@ router.put('/caution-deposit/refund', verifyToken, requireAdmin, async (req, res
                 require('../socket').getIO().emit('caution_deposit_updated', {
                     universityName: registration.universityName,
                     coachId,
-                    cautionDeposit: coach.cautionDeposit
+                    cautionDeposit: coach.cautionDeposit,
+                    depositId: updatedCaution?._id
                 });
             } catch (sErr) {}
 
             return res.status(200).json({
                 message: `Caution deposit marked as refunded for Coach ${coach.name}`,
                 cautionDeposit: coach.cautionDeposit,
-                coachId
+                coachId,
+                depositId: updatedCaution?._id
             });
         }
 
@@ -1223,22 +1537,74 @@ router.put('/caution-deposit/refund', verifyToken, requireAdmin, async (req, res
             return res.status(400).json({ message: 'Caution deposit has not been paid yet' });
         }
 
+        const stillOccupiedPlayers = (registration.players || []).filter(p => p.roomAllocation && p.roomAllocation.roomNumber);
+        if (stillOccupiedPlayers.length > 0) {
+            return res.status(400).json({
+                message: `Cannot process refund: ${stillOccupiedPlayers.length} team player(s) are still occupying room(s). All rooms must be vacated before refund.`
+            });
+        }
+
+        const storedHash = registration.cautionDeposit.refundOtpHash;
+        const expires = registration.cautionDeposit.refundOtpExpires;
+
+        if (!storedHash || !expires) {
+            return res.status(400).json({ message: 'No active refund OTP found. Please click "Refund" to generate a new OTP.' });
+        }
+        if (new Date() > new Date(expires)) {
+            return res.status(400).json({ message: 'OTP has expired. Please request a new OTP.' });
+        }
+
+        const isValid = cryptoUtils.verifyOtpHash(otp.trim(), storedHash);
+        if (!isValid) {
+            return res.status(400).json({ message: 'Invalid OTP. Please enter the correct 6-digit code received by the player.' });
+        }
+
+        const refundAmt = Number(refundedAmount) || registration.cautionDeposit.amount || 2000;
+
+        // 1. Update in separate CautionDeposit collection
+        const updatedCaution = await CautionDeposit.findOneAndUpdate(
+            {
+                registrationId: registration._id,
+                targetType: 'Team',
+                coachId: ''
+            },
+            {
+                $set: {
+                    refundStatus: 'Refunded',
+                    refundedAt: now,
+                    refundedAmount: refundAmt,
+                    refundedBy: adminName,
+                    refundOtpHash: null,
+                    refundOtpExpires: null
+                }
+            },
+            { new: true }
+        );
+
+        // 2. Dynamically sync into Registration collection
         registration.cautionDeposit.refundStatus = 'Refunded';
-        registration.cautionDeposit.refundedAt = new Date();
-        registration.cautionDeposit.refundedAmount = Number(refundedAmount) || registration.cautionDeposit.amount || 2000;
+        registration.cautionDeposit.refundedAt = now;
+        registration.cautionDeposit.refundedAmount = refundAmt;
+        registration.cautionDeposit.refundOtpHash = null;
+        registration.cautionDeposit.refundOtpExpires = null;
+        if (updatedCaution) {
+            registration.cautionDeposit.depositId = updatedCaution._id;
+        }
         await registration.save();
 
         try {
             require('../socket').getIO().emit('dataUpdated');
             require('../socket').getIO().emit('caution_deposit_updated', {
                 universityName: registration.universityName,
-                cautionDeposit: registration.cautionDeposit
+                cautionDeposit: registration.cautionDeposit,
+                depositId: updatedCaution?._id
             });
         } catch (sErr) {}
 
         res.status(200).json({
             message: `Caution deposit marked as refunded for ${registration.universityName}`,
-            cautionDeposit: registration.cautionDeposit
+            cautionDeposit: registration.cautionDeposit,
+            depositId: updatedCaution?._id
         });
     } catch (error) {
         console.error('Error refunding caution deposit:', error);
@@ -1246,7 +1612,7 @@ router.put('/caution-deposit/refund', verifyToken, requireAdmin, async (req, res
     }
 });
 
-// Reset / delete caution deposit payment
+// Reset / delete caution deposit payment - Resets both collections in sync
 router.delete('/caution-deposit', verifyToken, requireAdmin, async (req, res) => {
     try {
         const { registrationId, universityName, coachId } = req.body;
@@ -1269,8 +1635,34 @@ router.delete('/caution-deposit', verifyToken, requireAdmin, async (req, res) =>
             if (!coach) {
                 return res.status(404).json({ message: 'Coach not found' });
             }
+
+            // 1. Reset in CautionDeposit collection
+            await CautionDeposit.findOneAndUpdate(
+                {
+                    registrationId: registration._id,
+                    targetType: 'Coach',
+                    coachId: coachId.toString()
+                },
+                {
+                    $set: {
+                        paid: false,
+                        amount: 0,
+                        paidBy: { personId: '', name: '', role: 'Coach', phone: '', roomNumber: '' },
+                        paymentMode: 'Cash',
+                        receiptNo: '',
+                        notes: '',
+                        refundStatus: 'N/A',
+                        refundedAmount: 0,
+                        refundedAt: null
+                    }
+                }
+            );
+
+            // 2. Reset in Registration collection
             coach.cautionDeposit = {
                 paid: false,
+                paidByName: '',
+                depositId: null,
                 amount: 0,
                 paidBy: { personId: '', name: '', role: 'Coach', phone: '', roomNumber: '' },
                 paymentMode: 'Cash',
@@ -1294,8 +1686,33 @@ router.delete('/caution-deposit', verifyToken, requireAdmin, async (req, res) =>
             return res.status(200).json({ message: `Caution deposit reset for Coach ${coach.name}` });
         }
 
+        // 1. Reset in CautionDeposit collection
+        await CautionDeposit.findOneAndUpdate(
+            {
+                registrationId: registration._id,
+                targetType: 'Team',
+                coachId: ''
+            },
+            {
+                $set: {
+                    paid: false,
+                    amount: 0,
+                    paidBy: { personId: '', name: '', role: '', phone: '', roomNumber: '' },
+                    paymentMode: 'Cash',
+                    receiptNo: '',
+                    notes: '',
+                    refundStatus: 'N/A',
+                    refundedAmount: 0,
+                    refundedAt: null
+                }
+            }
+        );
+
+        // 2. Reset in Registration collection
         registration.cautionDeposit = {
             paid: false,
+            paidByName: '',
+            depositId: null,
             amount: 0,
             paidBy: { personId: '', name: '', role: '', phone: '', roomNumber: '' },
             paymentMode: 'Cash',
@@ -1320,5 +1737,112 @@ router.delete('/caution-deposit', verifyToken, requireAdmin, async (req, res) =>
         res.status(500).json({ message: 'Failed to reset caution deposit' });
     }
 });
+
+// GET all caution deposits directly from CautionDeposit collection
+router.get('/caution-deposits-list', verifyToken, requireAdmin, async (req, res) => {
+    try {
+        const deposits = await CautionDeposit.find({}).sort({ updatedAt: -1 }).populate('registrationId', 'universityName universityContact address');
+        res.status(200).json(deposits);
+    } catch (error) {
+        console.error('Error fetching caution deposits list:', error);
+        res.status(500).json({ message: 'Failed to fetch caution deposits' });
+    }
+});
+
+// Auto-sync existing registrations into CautionDeposit collection on startup
+const syncExistingCautionDeposits = async () => {
+    try {
+        const registrations = await Registration.find({});
+        for (const reg of registrations) {
+            // Sync Team Deposit
+            if (reg.cautionDeposit && reg.cautionDeposit.paid) {
+                const cautionDoc = await CautionDeposit.findOneAndUpdate(
+                    {
+                        registrationId: reg._id,
+                        targetType: 'Team',
+                        coachId: ''
+                    },
+                    {
+                        $set: {
+                            registrationId: reg._id,
+                            universityName: reg.universityName,
+                            targetType: 'Team',
+                            coachId: '',
+                            paid: reg.cautionDeposit.paid,
+                            amount: reg.cautionDeposit.amount || 2000,
+                            paidBy: reg.cautionDeposit.paidBy || {},
+                            paymentMode: reg.cautionDeposit.paymentMode || 'Cash',
+                            receiptNo: reg.cautionDeposit.receiptNo || '',
+                            paidAt: reg.cautionDeposit.paidAt || reg.updatedAt,
+                            collectedBy: reg.cautionDeposit.collectedBy || 'Hostel Admin',
+                            notes: reg.cautionDeposit.notes || '',
+                            refundStatus: reg.cautionDeposit.refundStatus || 'Refund Pending',
+                            refundedAt: reg.cautionDeposit.refundedAt || null,
+                            refundedAmount: reg.cautionDeposit.refundedAmount || 0
+                        }
+                    },
+                    { upsert: true, new: true }
+                );
+
+                if (!reg.cautionDeposit.paidByName && reg.cautionDeposit.paidBy?.name) {
+                    reg.cautionDeposit.paidByName = reg.cautionDeposit.paidBy.name;
+                    reg.cautionDeposit.depositId = cautionDoc._id;
+                    await reg.save();
+                }
+            }
+
+            // Sync Coach Deposits
+            if (reg.coaches && Array.isArray(reg.coaches)) {
+                let modified = false;
+                for (const coach of reg.coaches) {
+                    if (coach.cautionDeposit && coach.cautionDeposit.paid) {
+                        const coachCautionDoc = await CautionDeposit.findOneAndUpdate(
+                            {
+                                registrationId: reg._id,
+                                targetType: 'Coach',
+                                coachId: coach._id.toString()
+                            },
+                            {
+                                $set: {
+                                    registrationId: reg._id,
+                                    universityName: reg.universityName,
+                                    targetType: 'Coach',
+                                    coachId: coach._id.toString(),
+                                    paid: coach.cautionDeposit.paid,
+                                    amount: coach.cautionDeposit.amount || 2000,
+                                    paidBy: coach.cautionDeposit.paidBy || {},
+                                    paymentMode: coach.cautionDeposit.paymentMode || 'Cash',
+                                    receiptNo: coach.cautionDeposit.receiptNo || '',
+                                    paidAt: coach.cautionDeposit.paidAt || reg.updatedAt,
+                                    collectedBy: coach.cautionDeposit.collectedBy || 'Hostel Admin',
+                                    notes: coach.cautionDeposit.notes || '',
+                                    refundStatus: coach.cautionDeposit.refundStatus || 'Refund Pending',
+                                    refundedAt: coach.cautionDeposit.refundedAt || null,
+                                    refundedAmount: coach.cautionDeposit.refundedAmount || 0
+                                }
+                            },
+                            { upsert: true, new: true }
+                        );
+
+                        if (!coach.cautionDeposit.paidByName && coach.cautionDeposit.paidBy?.name) {
+                            coach.cautionDeposit.paidByName = coach.cautionDeposit.paidBy.name;
+                            coach.cautionDeposit.depositId = coachCautionDoc._id;
+                            modified = true;
+                        }
+                    }
+                }
+                if (modified) {
+                    reg.markModified('coaches');
+                    await reg.save();
+                }
+            }
+        }
+    } catch (err) {
+        console.error('Error during caution deposit initial sync:', err);
+    }
+};
+
+// Run auto-sync safely in background
+syncExistingCautionDeposits();
 
 module.exports = router;

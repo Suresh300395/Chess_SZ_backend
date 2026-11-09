@@ -16,7 +16,7 @@ const emitBlockUpdate = () => {
 
 exports.addBlock = async (req, res) => {
     try {
-        const { name, block, warden, wardenContact, officeHours, address, capacityPerRoom, floors } = req.body;
+        const { name, block, warden, wardenContact, incharge, inchargeContact, officeHours, address, capacityPerRoom, floors } = req.body;
         
         // Validation
         if (!name || !block) {
@@ -28,8 +28,20 @@ exports.addBlock = async (req, res) => {
             return res.status(400).json({ message: 'A block with this name already exists' });
         }
 
+        const inchargeName = incharge || warden || '';
+        const inchargePhone = inchargeContact || wardenContact || '';
+
         const newBlock = new HostelBlock({
-            name, block, warden, wardenContact, officeHours, address, capacityPerRoom, floors
+            name,
+            block,
+            warden: inchargeName,
+            wardenContact: inchargePhone,
+            incharge: inchargeName,
+            inchargeContact: inchargePhone,
+            officeHours: officeHours || '',
+            address: address || '',
+            capacityPerRoom,
+            floors
         });
 
         await newBlock.save();
@@ -71,12 +83,22 @@ exports.deleteBlock = async (req, res) => {
 exports.updateBlock = async (req, res) => {
     try {
         const { id } = req.params;
-        const allowedFields = ['name', 'block', 'warden', 'wardenContact', 'officeHours', 'address', 'capacityPerRoom', 'floors'];
+        const allowedFields = ['name', 'block', 'warden', 'wardenContact', 'incharge', 'inchargeContact', 'officeHours', 'address', 'capacityPerRoom', 'floors'];
         const updateData = {};
         for (const field of allowedFields) {
             if (req.body[field] !== undefined) {
                 updateData[field] = req.body[field];
             }
+        }
+        if (updateData.warden !== undefined && updateData.incharge === undefined) {
+            updateData.incharge = updateData.warden;
+        } else if (updateData.incharge !== undefined && updateData.warden === undefined) {
+            updateData.warden = updateData.incharge;
+        }
+        if (updateData.wardenContact !== undefined && updateData.inchargeContact === undefined) {
+            updateData.inchargeContact = updateData.wardenContact;
+        } else if (updateData.inchargeContact !== undefined && updateData.wardenContact === undefined) {
+            updateData.wardenContact = updateData.inchargeContact;
         }
         
         if (updateData.name) {

@@ -46,10 +46,17 @@ router.post('/issue-bulk', issueLimiter, foodTokenController.issueBulk);
 // 3b. Issue all tokens for one person for a specific day
 router.post('/issue-day', issueLimiter, foodTokenController.issueDayTokens);
 
-// 4. Reprint an existing token (ISSUED only)
+// 4. Verify a token by code
+router.post('/verify', foodTokenController.verifyToken);
+router.get('/verify/:code', foodTokenController.verifyToken);
+
+// 5. Redeem a token (mark as redeemed / food served)
+router.post('/redeem', foodTokenController.redeemToken);
+
+// 6. Reprint an existing token (ISSUED only)
 router.post('/:id/reprint', foodTokenController.reprintToken);
 
-// 5. Cancel a token with a mandatory reason
+// 7. Cancel a token with a mandatory reason
 router.post('/:id/cancel', foodTokenController.cancelToken);
 
 // 7. Get token list with filters and pagination

@@ -1,6 +1,6 @@
 const MEAL_TYPES = ['Breakfast', 'Lunch', 'Dinner'];
 const ORGANIZATION_NAME = 'Aditya University';
-const EVENT_NAME = 'South Zone Inter-University Chess Tournament';
+const EVENT_NAME = 'South Zone Inter-University Chess (Men) Tournament';
 const DEFAULT_PAPER_WIDTH = '80mm';
 
 // Expiration cutoff times for each meal

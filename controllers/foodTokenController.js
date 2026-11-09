@@ -913,12 +913,14 @@ exports.getStats = async (req, res) => {
         for (const type of MEAL_TYPES) {
             statsByMeal[type] = {
                 issued: 0,
+                redeemed: 0,
                 cancelled: 0,
                 total: 0
             };
         }
 
         let totalIssued = 0;
+        let totalRedeemed = 0;
         let totalCancelled = 0;
 
         for (const row of statsAgg) {
@@ -929,6 +931,9 @@ exports.getStats = async (req, res) => {
                 if (status === 'ISSUED') {
                     statsByMeal[mealType].issued += count;
                     totalIssued += count;
+                } else if (status === 'REDEEMED') {
+                    statsByMeal[mealType].redeemed += count;
+                    totalRedeemed += count;
                 } else if (status === 'CANCELLED') {
                     statsByMeal[mealType].cancelled += count;
                     totalCancelled += count;
@@ -945,12 +950,116 @@ exports.getStats = async (req, res) => {
             byMeal: statsByMeal,
             overall: {
                 totalIssued,
+                totalRedeemed,
                 totalCancelled,
-                totalActive: totalIssued - totalCancelled
+                totalActive: totalIssued + totalRedeemed
             }
         });
     } catch (error) {
         console.error('Error in getStats:', error);
         res.status(500).json({ message: 'Failed to compute stats', error: error.message });
+    }
+};
+
+/**
+ * 9. Verify Token by Code
+ * POST /api/food-tokens/verify or GET /api/food-tokens/verify/:code
+ */
+exports.verifyToken = async (req, res) => {
+    try {
+        const rawCode = (req.body && req.body.code) || (req.params && req.params.code) || (req.query && req.query.code);
+        if (!rawCode || typeof rawCode !== 'string' || !rawCode.trim()) {
+            return res.status(400).json({ success: false, message: 'Token code is required' });
+        }
+
+        const code = rawCode.trim().toUpperCase();
+        const token = await FoodToken.findOne({ code });
+
+        if (!token) {
+            return res.status(404).json({
+                success: false,
+                message: `Token code "${code}" not found. Please verify the code or QR.`,
+                code
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            token,
+            status: token.status,
+            isValidForRedemption: token.status === 'ISSUED',
+            isRedeemed: token.status === 'REDEEMED',
+            isCancelled: token.status === 'CANCELLED'
+        });
+    } catch (error) {
+        console.error('Error in verifyToken:', error);
+        res.status(500).json({ success: false, message: 'Failed to verify token', error: error.message });
+    }
+};
+
+/**
+ * 10. Redeem Token (Food Served)
+ * POST /api/food-tokens/redeem
+ */
+exports.redeemToken = async (req, res) => {
+    try {
+        const rawCode = (req.body && req.body.code) || (req.body && req.body.tokenId);
+        if (!rawCode || typeof rawCode !== 'string' || !rawCode.trim()) {
+            return res.status(400).json({ success: false, message: 'Token code or ID is required' });
+        }
+
+        const searchCriteria = mongoose.Types.ObjectId.isValid(rawCode.trim())
+            ? { $or: [{ _id: rawCode.trim() }, { code: rawCode.trim().toUpperCase() }] }
+            : { code: rawCode.trim().toUpperCase() };
+
+        const token = await FoodToken.findOne(searchCriteria);
+
+        if (!token) {
+            return res.status(404).json({
+                success: false,
+                message: `Token "${rawCode.trim().toUpperCase()}" not found.`
+            });
+        }
+
+        if (token.status === 'CANCELLED') {
+            return res.status(400).json({
+                success: false,
+                message: `CANNOT REDEEM: Token is CANCELLED! (Reason: ${token.cancelReason || 'Cancelled by admin'})`,
+                token
+            });
+        }
+
+        if (token.status === 'REDEEMED') {
+            return res.status(409).json({
+                success: false,
+                message: `ALREADY REDEEMED: This token was already used on ${new Date(token.redeemedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} by ${token.redeemedBy || 'Staff'}.`,
+                token,
+                alreadyRedeemed: true
+            });
+        }
+
+        // Mark as REDEEMED
+        const redeemer = (req.user && (req.user.username || req.user.name)) || req.body.redeemedBy || 'Staff';
+        token.status = 'REDEEMED';
+        token.redeemedAt = new Date();
+        token.redeemedBy = redeemer;
+        token.auditLog.push({
+            action: 'REDEEM',
+            performedBy: redeemer,
+            timestamp: new Date(),
+            details: `Meal served (${token.mealType}) on ${token.mealDate} via QR Scanner`
+        });
+
+        await token.save();
+        emitSocketUpdate();
+
+        return res.status(200).json({
+            success: true,
+            message: `Food served successfully for ${token.name} (${token.mealType})!`,
+            token
+        });
+    } catch (error) {
+        console.error('Error in redeemToken:', error);
+        res.status(500).json({ success: false, message: 'Failed to redeem token', error: error.message });
     }
 };

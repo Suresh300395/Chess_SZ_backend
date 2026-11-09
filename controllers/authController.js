@@ -234,7 +234,7 @@ exports.getDashboard = async (req, res) => {
                 block: blockVal,
                 room: roomVal,
                 stay: stayText,
-                eventName: t.eventName || 'South Zone Inter-University Chess Tournament',
+                eventName: t.eventName || 'South Zone Inter-University Chess (Men) Tournament',
                 mealType: t.mealType,
                 mealDate: t.mealDate,
                 status: expired ? 'EXPIRED' : t.status,
@@ -278,7 +278,13 @@ exports.getDashboard = async (req, res) => {
                     paid: true,
                     refundStatus: coachDeposit.refundStatus || 'Refund Pending',
                     paidBy: coachDeposit.paidBy?.name || participant?.name || user.name || 'Coach',
+                    paidByRole: coachDeposit.paidBy?.role || participant?.role || 'Coach',
+                    paidByPhone: coachDeposit.paidBy?.phone || participant?.mobileNo || user.mobile || '',
                     receiptNo: coachDeposit.receiptNo || '',
+                    paymentMode: coachDeposit.paymentMode || 'Cash',
+                    roomNumber: participant?.roomAllocation?.roomNumber || '',
+                    building: participant?.roomAllocation?.building || '',
+                    universityName: reg?.universityName || participant?.university || '',
                     paidAt: coachDeposit.paidAt
                 };
             }
@@ -289,8 +295,14 @@ exports.getDashboard = async (req, res) => {
                     amount: Number(reg.cautionDeposit.amount) || 0,
                     paid: true,
                     refundStatus: reg.cautionDeposit.refundStatus || 'Refund Pending',
-                    paidBy: reg.cautionDeposit.paidBy?.name || 'Representative',
+                    paidBy: reg.cautionDeposit.paidBy?.name || reg.cautionDeposit.paidByName || 'Representative',
+                    paidByRole: reg.cautionDeposit.paidBy?.role || 'Player',
+                    paidByPhone: reg.cautionDeposit.paidBy?.phone || '',
                     receiptNo: reg.cautionDeposit.receiptNo || '',
+                    paymentMode: reg.cautionDeposit.paymentMode || 'Cash',
+                    roomNumber: reg.cautionDeposit.paidBy?.roomNumber || mappedAcc?.roomNumber || '',
+                    building: mappedAcc?.hostelName || mappedAcc?.building || '',
+                    universityName: reg.universityName || '',
                     paidAt: reg.cautionDeposit.paidAt
                 };
             }
@@ -431,8 +443,10 @@ exports.getAccommodationDetails = async (req, res) => {
             hostelInfo: {
                 name: blockDetails.name || building,
                 block: blockDetails.block || building,
-                warden: blockDetails.warden || '',
-                wardenContact: blockDetails.wardenContact || '',
+                warden: blockDetails.incharge || blockDetails.warden || '',
+                wardenContact: blockDetails.inchargeContact || blockDetails.wardenContact || '',
+                incharge: blockDetails.incharge || blockDetails.warden || '',
+                inchargeContact: blockDetails.inchargeContact || blockDetails.wardenContact || '',
                 officeHours: blockDetails.officeHours || '',
                 address: blockDetails.address || ''
             },
@@ -519,7 +533,7 @@ exports.getFoodTokenDetails = async (req, res) => {
                 block: blockVal,
                 room: roomVal,
                 stay: stayText,
-                eventName: t.eventName || 'South Zone Inter-University Chess Tournament',
+                eventName: t.eventName || 'South Zone Inter-University Chess (Men) Tournament',
                 mealType: t.mealType,
                 mealDate: t.mealDate,
                 status: expired ? 'EXPIRED' : t.status,

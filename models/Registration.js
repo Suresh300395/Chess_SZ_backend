@@ -23,6 +23,8 @@ const playerSchema = new mongoose.Schema({
 
 const cautionDepositSchema = new mongoose.Schema({
     paid: { type: Boolean, default: false },
+    paidByName: { type: String, default: '' },
+    depositId: { type: mongoose.Schema.Types.ObjectId, ref: 'CautionDeposit', default: null },
     amount: { type: Number, default: 0 },
     paidBy: {
         personId: { type: String, default: '' },
@@ -38,7 +40,11 @@ const cautionDepositSchema = new mongoose.Schema({
     notes: { type: String, default: '' },
     refundStatus: { type: String, enum: ['N/A', 'Refund Pending', 'Refunded'], default: 'N/A' },
     refundedAt: { type: Date },
-    refundedAmount: { type: Number, default: 0 }
+    refundedAmount: { type: Number, default: 0 },
+    refundOtpHash: { type: String, default: null },
+    refundOtpExpires: { type: Date, default: null },
+    refundOtpSentTo: { type: String, default: '' },
+    refundOtpSentName: { type: String, default: '' }
 }, { _id: false });
 
 const coachSchema = new mongoose.Schema({
