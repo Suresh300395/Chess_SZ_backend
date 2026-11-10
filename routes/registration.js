@@ -407,7 +407,7 @@ router.post('/', registrationLimiter, async (req, res) => {
             const updatedRegistration = await Registration.findByIdAndUpdate(
                 existingUniversity._id,
                 { $push: updateOps },
-                { new: true, runValidators: true }
+                { returnDocument: 'after', runValidators: true }
             );
 
             // Create accounts ONLY for new participants (with rollback on failure)
@@ -810,9 +810,27 @@ router.post('/', registrationLimiter, async (req, res) => {
             throw creationErr;
         }
 
+        // Update University Master registeredTeamCount if matching university exists
+        try {
+            const University = require('../models/University');
+            const norm = University.normalize(teamDetails.universityName);
+            await University.findOneAndUpdate(
+                {
+                    $or: [
+                        { normalizedName: norm },
+                        { normalizedAliases: norm }
+                    ]
+                },
+                { $inc: { registeredTeamCount: 1 } }
+            );
+        } catch (uErr) {
+            console.error('Note: University Master team count sync:', uErr.message);
+        }
+
         // Emit event for real-time update
         try {
             require('../socket').getIO().emit('dataUpdated');
+            require('../socket').getIO().emit('universityUpdated');
         } catch (socketErr) {
             console.error('Socket emit error:', socketErr);
         }
@@ -1156,7 +1174,7 @@ router.put('/caution-deposit', verifyToken, requireAdmin, async (req, res) => {
                         rooms: coach.roomAllocation?.roomNumber ? [`Room ${coach.roomAllocation.roomNumber}`] : []
                     }
                 },
-                { upsert: true, new: true }
+                { upsert: true, returnDocument: 'after' }
             );
 
             // 2. Dynamically sync into Registration collection (maintains paid status, paidByName, depositId)
@@ -1228,7 +1246,7 @@ router.put('/caution-deposit', verifyToken, requireAdmin, async (req, res) => {
                     rooms: Array.from(new Set(teamRooms))
                 }
             },
-            { upsert: true, new: true }
+            { upsert: true, returnDocument: 'after' }
         );
 
         // 2. Dynamically sync into Registration collection (maintains paid status, paidByName, depositId)
@@ -1500,7 +1518,7 @@ router.put('/caution-deposit/refund', verifyToken, requireAdmin, async (req, res
                         refundOtpExpires: null
                     }
                 },
-                { new: true }
+                { returnDocument: 'after' }
             );
 
             // 2. Dynamically sync into Registration collection
@@ -1578,7 +1596,7 @@ router.put('/caution-deposit/refund', verifyToken, requireAdmin, async (req, res
                     refundOtpExpires: null
                 }
             },
-            { new: true }
+            { returnDocument: 'after' }
         );
 
         // 2. Dynamically sync into Registration collection
@@ -1781,7 +1799,7 @@ const syncExistingCautionDeposits = async () => {
                             refundedAmount: reg.cautionDeposit.refundedAmount || 0
                         }
                     },
-                    { upsert: true, new: true }
+                    { upsert: true, returnDocument: 'after' }
                 );
 
                 if (!reg.cautionDeposit.paidByName && reg.cautionDeposit.paidBy?.name) {
@@ -1821,7 +1839,7 @@ const syncExistingCautionDeposits = async () => {
                                     refundedAmount: coach.cautionDeposit.refundedAmount || 0
                                 }
                             },
-                            { upsert: true, new: true }
+                            { upsert: true, returnDocument: 'after' }
                         );
 
                         if (!coach.cautionDeposit.paidByName && coach.cautionDeposit.paidBy?.name) {

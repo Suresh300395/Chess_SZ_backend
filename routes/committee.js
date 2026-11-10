@@ -146,7 +146,7 @@ router.put('/:id', verifyToken, requireAdmin, async (req, res) => {
         const updatedMember = await Committee.findByIdAndUpdate(
             req.params.id,
             updateData,
-            { new: true }
+            { returnDocument: 'after' }
         );
         
         try {
@@ -172,7 +172,7 @@ router.put('/:id/order', verifyToken, requireAdmin, async (req, res) => {
         const updatedMember = await Committee.findByIdAndUpdate(
             req.params.id,
             { order: Number(order) },
-            { new: true }
+            { returnDocument: 'after' }
         );
         
         if (!updatedMember) {

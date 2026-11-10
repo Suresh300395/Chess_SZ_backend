@@ -108,7 +108,7 @@ exports.updateBlock = async (req, res) => {
             }
         }
         
-        const updatedBlock = await HostelBlock.findByIdAndUpdate(id, { $set: updateData }, { new: true, runValidators: true });
+        const updatedBlock = await HostelBlock.findByIdAndUpdate(id, { $set: updateData }, { returnDocument: 'after', runValidators: true });
         if (!updatedBlock) {
              return res.status(404).json({ message: 'Block not found' });
         }

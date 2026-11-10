@@ -13,6 +13,7 @@ const blocksRoutes = require('./routes/blocks');
 const foodTokenRoutes = require('./routes/foodTokens');
 const routeMapRoutes = require('./routes/routeMap');
 const liveBoardRoutes = require('./routes/liveBoard');
+const universityRoutes = require('./routes/universityMaster');
 const helmet = require('helmet');
 const authController = require('./controllers/authController');
 
@@ -34,6 +35,23 @@ connectDB().then(() => {
     const RouteMap = require('./models/RouteMap');
     RouteMap.updateMany({ mapImage: { $exists: true } }, { $unset: { mapImage: 1 } }).catch(err => {
         console.error('Error cleaning up mapImage from DB:', err.message);
+    });
+
+    // Auto-remove empty / unused fields from University collection
+    const University = require('./models/University');
+    University.updateMany({}, {
+        $unset: {
+            shortCode: 1,
+            aliases: 1,
+            normalizedAliases: 1,
+            state: 1,
+            city: 1,
+            contactPerson: 1,
+            email: 1,
+            notes: 1
+        }
+    }).catch(err => {
+        console.error('Error cleaning up empty fields from University DB:', err.message);
     });
 });
 
@@ -72,6 +90,7 @@ app.use('/api/blocks', blocksRoutes);
 app.use('/api/food-tokens', foodTokenRoutes);
 app.use('/api/route-map', routeMapRoutes);
 app.use('/api/live-board', liveBoardRoutes);
+app.use('/api/universities', universityRoutes);
 
 // Global error handler
 app.use((err, req, res, next) => {
