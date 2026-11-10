@@ -16,6 +16,7 @@ router.post('/bulk-import', verifyToken, requireAdmin, universityController.bulk
 router.post('/', verifyToken, requireAdmin, universityController.createUniversity);
 router.put('/:id', verifyToken, requireAdmin, universityController.updateUniversity);
 router.patch('/:id/status', verifyToken, requireAdmin, universityController.toggleStatus);
+router.put('/:id/status', verifyToken, requireAdmin, universityController.toggleStatus);
 router.delete('/:id', verifyToken, requireAdmin, universityController.deleteUniversity);
 
 module.exports = router;

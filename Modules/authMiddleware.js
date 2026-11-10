@@ -11,7 +11,7 @@ const getJwtSecret = () => {
 // Verify JWT token middleware
 const verifyToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1]; // Bearer <token>
+    const token = (authHeader && authHeader.split(' ')[1]) || req.query.token; // Bearer <token> or ?token=... query
 
     if (!token) {
         return res.status(401).json({ message: 'Access denied. No token provided.' });

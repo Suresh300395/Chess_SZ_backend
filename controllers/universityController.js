@@ -442,14 +442,18 @@ exports.toggleStatus = async (req, res) => {
             return res.status(404).json({ success: false, message: 'University not found' });
         }
 
-        university.status = university.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
-        await university.save();
+        const newStatus = university.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+        const updated = await University.findByIdAndUpdate(
+            id,
+            { $set: { status: newStatus } },
+            { new: true, runValidators: true }
+        );
         emitUniversityUpdate();
 
         res.status(200).json({
             success: true,
-            message: `University status updated to ${university.status}`,
-            university
+            message: `University status updated to ${updated.status}`,
+            university: updated
         });
     } catch (error) {
         console.error('Error toggling status:', error);
@@ -647,17 +651,36 @@ exports.exportUniversities = async (req, res) => {
         const query = {};
         if (status && status !== 'ALL') query.status = status;
 
-        const universities = await University.find(query).sort({ name: 1 }).lean();
+        const [universities, regCounts] = await Promise.all([
+            University.find(query).sort({ name: 1 }).lean(),
+            Registration.aggregate([
+                {
+                    $group: {
+                        _id: { $toLower: '$universityName' },
+                        playerCount: { $sum: { $size: { $ifNull: ['$players', []] } } }
+                    }
+                }
+            ])
+        ]);
 
-        const dataToExport = universities.map((u, idx) => ({
-            'S.No': idx + 1,
-            'University Name': u.name,
-            'University Contact': u.phone || '',
-            'Address': u.address || '',
-            'Registered Players': u.registeredPlayerCount ?? u.registeredTeamCount ?? 0,
-            'Status': u.status,
-            'Created Date': u.createdAt ? new Date(u.createdAt).toLocaleDateString('en-IN') : ''
-        }));
+        const playerMap = {};
+        regCounts.forEach(r => {
+            if (r._id) playerMap[r._id.trim()] = r.playerCount || 0;
+        });
+
+        const dataToExport = universities.map((u, idx) => {
+            const norm = (u.name || '').toLowerCase().trim();
+            const players = playerMap[norm] ?? u.registeredPlayerCount ?? u.registeredTeamCount ?? 0;
+            return {
+                'S.No': idx + 1,
+                'University Name': u.name,
+                'University Contact': u.phone || '',
+                'Address': u.address || '',
+                'Registered Players': players,
+                'Status': u.status,
+                'Created Date': u.createdAt ? new Date(u.createdAt).toLocaleDateString('en-IN') : ''
+            };
+        });
 
         const workbook = xlsx.utils.book_new();
         const worksheet = xlsx.utils.json_to_sheet(dataToExport);

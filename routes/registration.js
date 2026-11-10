@@ -545,8 +545,16 @@ router.post('/', registrationLimiter, async (req, res) => {
             });
         }
 
-        if (Array.isArray(players)) {
-            for (let i = 0; i < players.length; i++) {
+        // Validate that new university has at least 1 player and 1 coach/manager
+        if (!Array.isArray(players) || players.length === 0) {
+            return res.status(400).json({ error: 'At least 1 Player is required for new university registration.' });
+        }
+
+        if (!Array.isArray(coaches) || coaches.length === 0) {
+            return res.status(400).json({ error: 'At least 1 Coach/Manager is required for new university registration.' });
+        }
+
+        for (let i = 0; i < players.length; i++) {
                 const p = players[i];
                 if (!p.playerName || numberRegex.test(p.playerName)) {
                     return res.status(400).json({ error: `Player ${i + 1}: Name cannot contain numbers` });
@@ -570,9 +578,7 @@ router.post('/', registrationLimiter, async (req, res) => {
                     return res.status(400).json({ error: `Player ${i + 1}: Arrival date and time are required` });
                 }
             }
-        }
 
-        if (Array.isArray(coaches)) {
             for (let i = 0; i < coaches.length; i++) {
                 const c = coaches[i];
                 if (!c.role) {
@@ -591,7 +597,6 @@ router.post('/', registrationLimiter, async (req, res) => {
                     return res.status(400).json({ error: `Coach/Manager ${i + 1}: Gender is required` });
                 }
             }
-        }
 
         // Duplicate checks within submission
         const seenMobilesInForm = new Map();
@@ -609,9 +614,7 @@ router.post('/', registrationLimiter, async (req, res) => {
                     seenMobilesInForm.set(mob, `Player ${i + 1}`);
                 }
             }
-        }
 
-        if (Array.isArray(coaches)) {
             for (let i = 0; i < coaches.length; i++) {
                 const mob = coaches[i].mobileNo?.trim();
                 const email = coaches[i].mailId?.trim().toLowerCase();
