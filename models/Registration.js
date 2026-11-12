@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 
 const playerSchema = new mongoose.Schema({
     playerName: { type: String, required: true },
+    fideId: { type: String, default: '' },
     mobileNo: { type: String, required: true },
     gender: { type: String, required: true },
     dob: { type: String, required: true },

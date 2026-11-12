@@ -56,6 +56,7 @@ router.get('/search-universities', searchLimiter, async (req, res) => {
             players: (uni.players || []).map(p => ({
                 _id: p._id,
                 playerName: p.playerName,
+                fideId: p.fideId || '',
                 mobileNo: p.mobileNo,
                 gender: p.gender,
                 dob: p.dob,
@@ -114,6 +115,7 @@ router.get('/university/:id', async (req, res) => {
             players: (university.players || []).map(p => ({
                 _id: p._id,
                 playerName: p.playerName,
+                fideId: p.fideId || '',
                 mobileNo: p.mobileNo,
                 gender: p.gender,
                 dob: p.dob,
@@ -234,6 +236,20 @@ router.post('/', registrationLimiter, async (req, res) => {
             if (genuinelyNewPlayers.length === 0 && genuinelyNewCoaches.length === 0) {
                 return res.status(400).json({
                     error: 'No new players or coaches were added to register for this university.'
+                });
+            }
+
+            const totalPlayersAfterAppend = (existingUniversity.players?.length || 0) + genuinelyNewPlayers.length;
+            if (totalPlayersAfterAppend > 6) {
+                return res.status(400).json({
+                    error: `Cannot add ${genuinelyNewPlayers.length} player(s). University already has ${existingUniversity.players?.length || 0} registered player(s). Maximum allowed is 6 players (4 Main + 2 Reserves).`
+                });
+            }
+
+            const totalCoachesAfterAppend = (existingUniversity.coaches?.length || 0) + genuinelyNewCoaches.length;
+            if (totalCoachesAfterAppend > 2) {
+                return res.status(400).json({
+                    error: `Cannot add ${genuinelyNewCoaches.length} coach/manager(s). University already has ${existingUniversity.coaches?.length || 0} registered coach/manager(s). Maximum allowed is 2 Coach/Manager members.`
                 });
             }
 
@@ -374,6 +390,7 @@ router.post('/', registrationLimiter, async (req, res) => {
             const playersToPush = genuinelyNewPlayers.map(p => ({
                 _id: new mongoose.Types.ObjectId(),
                 playerName: p.playerName.trim(),
+                fideId: (p.fideId || '').trim(),
                 mobileNo: p.mobileNo.trim(),
                 gender: p.gender,
                 dob: p.dob,
@@ -545,13 +562,21 @@ router.post('/', registrationLimiter, async (req, res) => {
             });
         }
 
-        // Validate that new university has at least 1 player and 1 coach/manager
-        if (!Array.isArray(players) || players.length === 0) {
-            return res.status(400).json({ error: 'At least 1 Player is required for new university registration.' });
+        // Validate that new university has at least 4 players and max 6 players, and at least 1 coach/manager
+        if (!Array.isArray(players) || players.length < 4) {
+            return res.status(400).json({ error: 'Minimum 4 players are required for new university registration.' });
         }
 
-        if (!Array.isArray(coaches) || coaches.length === 0) {
+        if (players.length > 6) {
+            return res.status(400).json({ error: 'Maximum 6 players are allowed for university registration (4 Main + 2 Reserves).' });
+        }
+
+        if (!Array.isArray(coaches) || coaches.length < 1) {
             return res.status(400).json({ error: 'At least 1 Coach/Manager is required for new university registration.' });
+        }
+
+        if (coaches.length > 2) {
+            return res.status(400).json({ error: 'Maximum 2 Coach/Manager members are allowed for university registration.' });
         }
 
         for (let i = 0; i < players.length; i++) {
@@ -692,6 +717,7 @@ router.post('/', registrationLimiter, async (req, res) => {
             address: teamDetails.address.trim(),
             players: (players || []).map(p => ({
                 playerName: p.playerName.trim(),
+                fideId: (p.fideId || '').trim(),
                 mobileNo: p.mobileNo.trim(),
                 gender: p.gender,
                 dob: p.dob,
