@@ -76,7 +76,8 @@ const coachSchema = new mongoose.Schema({
 const registrationSchema = new mongoose.Schema({
     universityName: { type: String, required: true },
     universityContact: { type: String, required: true },
-    address: { type: String, required: true },
+    universityEmail: { type: String, default: '' },
+    address: { type: String, default: '' },
     players: [playerSchema],
     coaches: [coachSchema],
     cautionDeposit: {

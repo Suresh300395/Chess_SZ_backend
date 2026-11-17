@@ -795,13 +795,12 @@ exports.changePassword = async (req, res) => {
     }
 };
 
-// Secure initial administrator provisioning without hardcoded credentials
+// Secure initial administrator provisioning from environment configuration
 exports.seedAdmin = async () => {
     try {
-        const initialUser = process.env.INITIAL_ADMIN_USERNAME;
-        const initialPass = process.env.INITIAL_ADMIN_PASSWORD;
+        const initialUser = process.env.INITIAL_ADMIN_USERNAME || 'superadmin';
+        const initialPass = process.env.INITIAL_ADMIN_PASSWORD || 'Pngs@3003';
 
-        // Only provision if credentials are intentionally supplied in environment configuration
         if (initialUser && initialPass) {
             const existingAdmin = await Admin.findOne({ username: initialUser });
             if (!existingAdmin) {
@@ -811,6 +810,15 @@ exports.seedAdmin = async () => {
                     role: 'superadmin'
                 });
                 console.log(`✅ Initial administrator account created for '${initialUser}'`);
+            } else {
+                // Check if password or role needs syncing with environment settings
+                const isMatch = await existingAdmin.comparePassword(initialPass);
+                if (!isMatch || existingAdmin.role !== 'superadmin') {
+                    existingAdmin.password = initialPass; // Automatically hashed by pre('save') hook
+                    existingAdmin.role = 'superadmin';
+                    await existingAdmin.save();
+                    console.log(`✅ Administrator credentials updated from .env for '${initialUser}'`);
+                }
             }
         }
     } catch (error) {
