@@ -53,27 +53,77 @@ connectDB().then(() => {
     }).catch(err => {
         console.error('Error cleaning up empty fields from University DB:', err.message);
     });
+
+    // Ensure LiveBoard has default Chess-Results tournament URL if empty
+    const LiveBoard = require('./models/LiveBoard');
+    LiveBoard.updateMany(
+        { $or: [{ embedUrl: '' }, { embedUrl: { $exists: false } }] },
+        {
+            $set: {
+                embedUrl: 'https://s1.chess-results.com/tnr1522420.aspx?lan=1&SNode=S0',
+                externalLink: 'https://s1.chess-results.com/tnr1522420.aspx?lan=1&SNode=S0'
+            }
+        }
+    ).catch(err => {
+        console.error('Error setting LiveBoard default embed URL:', err.message);
+    });
 });
 
-// Secure CORS - only allow frontend origin
-const allowedOrigins = [
-    process.env.FRONTEND_URL || 'http://localhost:5173',
+// Dynamic & configurable CORS
+const configuredOrigins = [
+    process.env.FRONTEND_URL,
+    process.env.ALLOWED_ORIGINS,
+    process.env.CORS_ORIGIN
+]
+    .filter(Boolean)
+    .flatMap(item => item.split(',').map(s => s.trim()))
+    .filter(Boolean);
+
+const defaultOrigins = [
+    'http://localhost:3331',
+    'http://localhost:5173',
     'http://localhost:5174',
     'http://localhost:3000',
+    'http://127.0.0.1:3331',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:5174',
+    'http://127.0.0.1:3000'
 ];
+
+const allowedOrigins = Array.from(new Set([...configuredOrigins, ...defaultOrigins]));
+
+const isOriginAllowed = (origin) => {
+    // Non-browser / same-origin requests
+    if (!origin) return true;
+
+    // Allow all if explicitly configured with * or CORS_ALLOW_ALL
+    if (allowedOrigins.includes('*') || process.env.CORS_ALLOW_ALL === 'true') {
+        return true;
+    }
+
+    // Check exact or normalized origin
+    if (allowedOrigins.includes(origin)) return true;
+    const normalized = origin.replace(/\/+$/, '');
+    if (allowedOrigins.some(o => o.replace(/\/+$/, '') === normalized)) return true;
+
+    // If strict CORS is not explicitly enforced, allow cross-origin requests
+    if (process.env.STRICT_CORS !== 'true') {
+        return true;
+    }
+
+    return false;
+};
 
 app.use(cors({
     origin: (origin, callback) => {
-        // Allow requests with no origin (mobile apps, Postman, etc.)
-        if (!origin) return callback(null, true);
-        if (allowedOrigins.includes(origin)) {
+        if (isOriginAllowed(origin)) {
             return callback(null, true);
         }
         callback(new Error('Not allowed by CORS'));
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
 }));
 
 app.use(logger('dev'));

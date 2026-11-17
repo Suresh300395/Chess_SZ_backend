@@ -52,7 +52,8 @@ router.get('/search-universities', searchLimiter, async (req, res) => {
             _id: uni._id,
             universityName: uni.universityName,
             universityContact: uni.universityContact,
-            address: uni.address,
+            universityEmail: uni.universityEmail || uni.address || '',
+            address: uni.address || uni.universityEmail || '',
             players: (uni.players || []).map(p => ({
                 _id: p._id,
                 playerName: p.playerName,
@@ -111,7 +112,8 @@ router.get('/university/:id', async (req, res) => {
             _id: university._id,
             universityName: university.universityName,
             universityContact: university.universityContact,
-            address: university.address,
+            universityEmail: university.universityEmail || university.address || '',
+            address: university.address || university.universityEmail || '',
             players: (university.players || []).map(p => ({
                 _id: p._id,
                 playerName: p.playerName,
@@ -548,8 +550,12 @@ router.post('/', registrationLimiter, async (req, res) => {
             return res.status(400).json({ error: 'University contact must be exactly 10 digits starting with 6, 7, 8, or 9' });
         }
 
-        if (!teamDetails?.address || !teamDetails.address.trim()) {
-            return res.status(400).json({ error: 'University address is required' });
+        const uniEmailVal = (teamDetails?.universityEmail || teamDetails?.email || teamDetails?.address || '').trim();
+        if (!uniEmailVal) {
+            return res.status(400).json({ error: 'University email is required' });
+        }
+        if (uniEmailVal.includes('@') && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(uniEmailVal)) {
+            return res.status(400).json({ error: 'Valid university email is required' });
         }
 
         // Check for duplicate university name
@@ -714,7 +720,8 @@ router.post('/', registrationLimiter, async (req, res) => {
         const newRegistration = new Registration({
             universityName: teamDetails.universityName.trim(),
             universityContact: teamDetails.universityContact.trim(),
-            address: teamDetails.address.trim(),
+            universityEmail: uniEmailVal,
+            address: teamDetails.address ? teamDetails.address.trim() : uniEmailVal,
             players: (players || []).map(p => ({
                 playerName: p.playerName.trim(),
                 fideId: (p.fideId || '').trim(),

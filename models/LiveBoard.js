@@ -29,11 +29,15 @@ const liveBoardSchema = new mongoose.Schema({
     },
     embedUrl: {
         type: String,
-        default: '' // Lichess broadcast, Chess.com or YouTube live embed URL
+        default: 'https://s1.chess-results.com/tnr1522420.aspx?lan=1&SNode=S0' // Chess-results embed URL
     },
     externalLink: {
         type: String,
-        default: '' // Chess-results pairing or ranking link
+        default: 'https://s1.chess-results.com/tnr1522420.aspx?lan=1&SNode=S0' // Chess-results pairing or ranking link
+    },
+    streamUrl: {
+        type: String,
+        default: '' // Live video streaming embed URL (YouTube / Twitch / Custom)
     },
     matches: [matchSchema],
     updatedBy: {
