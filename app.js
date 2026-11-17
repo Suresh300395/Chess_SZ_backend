@@ -15,7 +15,6 @@ const routeMapRoutes = require('./routes/routeMap');
 const liveBoardRoutes = require('./routes/liveBoard');
 const universityRoutes = require('./routes/universityMaster');
 const helmet = require('helmet');
-const authController = require('./controllers/authController');
 
 var app = express();
 app.disable('x-powered-by');
@@ -25,48 +24,8 @@ app.use(helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" },
 }));
 
-connectDB().then(() => {
-    authController.seedAdmin();
-    const blockController = require('./controllers/blockController');
-    if (typeof blockController.initCategories === 'function') {
-        blockController.initCategories();
-    }
-    // Auto-remove deprecated mapImage field from RouteMap collection
-    const RouteMap = require('./models/RouteMap');
-    RouteMap.updateMany({ mapImage: { $exists: true } }, { $unset: { mapImage: 1 } }).catch(err => {
-        console.error('Error cleaning up mapImage from DB:', err.message);
-    });
-
-    // Auto-remove empty / unused fields from University collection
-    const University = require('./models/University');
-    University.updateMany({}, {
-        $unset: {
-            shortCode: 1,
-            aliases: 1,
-            normalizedAliases: 1,
-            state: 1,
-            city: 1,
-            contactPerson: 1,
-            email: 1,
-            notes: 1
-        }
-    }).catch(err => {
-        console.error('Error cleaning up empty fields from University DB:', err.message);
-    });
-
-    // Ensure LiveBoard has default Chess-Results tournament URL if empty
-    const LiveBoard = require('./models/LiveBoard');
-    LiveBoard.updateMany(
-        { $or: [{ embedUrl: '' }, { embedUrl: { $exists: false } }] },
-        {
-            $set: {
-                embedUrl: 'https://s1.chess-results.com/tnr1522420.aspx?lan=1&SNode=S0',
-                externalLink: 'https://s1.chess-results.com/tnr1522420.aspx?lan=1&SNode=S0'
-            }
-        }
-    ).catch(err => {
-        console.error('Error setting LiveBoard default embed URL:', err.message);
-    });
+connectDB().catch(err => {
+    console.error('Database connection error:', err.message);
 });
 
 // Dynamic & configurable CORS

@@ -5,10 +5,12 @@ dotenv.config();
 
 const connectDB = async () => {
     try {
-        const conn = await mongoose.connect(
-            process.env.MONGO_URI
-        );
+        const conn = await mongoose.connect(process.env.MONGO_URI, {
+            autoIndex: false,
+            autoCreate: false
+        });
         console.log("Mongodb connected successfully");
+        return conn;
 
     } catch (error) {
         console.error(`Database connection error: ${error.message}`);

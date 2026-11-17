@@ -7,33 +7,23 @@ const { verifyToken, requireSuperAdmin } = require('../Modules/authMiddleware');
 router.get('/', async (req, res) => {
     try {
         let board = await LiveBoard.findOne().sort({ updatedAt: -1 });
-        const defaultUrl = 'https://s1.chess-results.com/tnr1522420.aspx?lan=1&SNode=S0';
 
         if (!board) {
-            board = new LiveBoard({
+            const defaultBoard = {
                 title: 'South Zone Inter-University Chess Championship - Live Board',
                 currentRound: 'Round 1',
                 status: 'LIVE',
                 announcement: 'Tournament live board is active. Follow the top boards in real-time!',
-                embedUrl: defaultUrl,
-                externalLink: defaultUrl,
+                embedUrl: '',
+                externalLink: '',
+                streamUrl: '',
                 matches: []
-            });
-            await board.save().catch(() => {});
-            return res.status(200).json(board);
+            };
+            return res.status(200).json(defaultBoard);
         }
 
-        // Auto-populate default Chess-Results tournament URL if empty
-        if (!board.embedUrl) {
-            board.embedUrl = defaultUrl;
-            if (!board.externalLink) board.externalLink = defaultUrl;
-            await LiveBoard.findByIdAndUpdate(board._id, {
-                embedUrl: board.embedUrl,
-                externalLink: board.externalLink
-            }).catch(() => {});
-        }
-
-        res.status(200).json(board);
+        const responseData = board.toObject();
+        res.status(200).json(responseData);
     } catch (error) {
         console.error('Error fetching live board:', error);
         res.status(500).json({ message: 'Failed to fetch live board', error: error.message });
@@ -54,9 +44,20 @@ router.put('/', verifyToken, requireSuperAdmin, async (req, res) => {
         if (currentRound !== undefined) board.currentRound = currentRound;
         if (status !== undefined) board.status = status;
         if (announcement !== undefined) board.announcement = announcement;
-        if (embedUrl !== undefined) board.embedUrl = embedUrl;
-        if (externalLink !== undefined) board.externalLink = externalLink;
-        if (streamUrl !== undefined) board.streamUrl = streamUrl;
+        
+        // Single field sync: embedUrl and externalLink save whatever URL is given (even if empty)
+        if (embedUrl !== undefined) {
+            const cleanUrl = (embedUrl || '').trim();
+            board.embedUrl = cleanUrl;
+            board.externalLink = (externalLink !== undefined ? (externalLink || '').trim() : cleanUrl);
+        } else if (externalLink !== undefined) {
+            board.externalLink = (externalLink || '').trim();
+        }
+
+        if (streamUrl !== undefined) {
+            board.streamUrl = (streamUrl || '').trim();
+        }
+
         if (Array.isArray(matches)) board.matches = matches;
 
         board.updatedBy = req.user?.username || 'Super Admin';

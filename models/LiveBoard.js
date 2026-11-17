@@ -29,11 +29,11 @@ const liveBoardSchema = new mongoose.Schema({
     },
     embedUrl: {
         type: String,
-        default: 'https://s1.chess-results.com/tnr1522420.aspx?lan=1&SNode=S0' // Chess-results embed URL
+        default: '' // Chess-results embed URL
     },
     externalLink: {
         type: String,
-        default: 'https://s1.chess-results.com/tnr1522420.aspx?lan=1&SNode=S0' // Chess-results pairing or ranking link
+        default: '' // Chess-results pairing or ranking link
     },
     streamUrl: {
         type: String,
