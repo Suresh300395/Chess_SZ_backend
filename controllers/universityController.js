@@ -236,12 +236,32 @@ exports.searchActiveUniversities = async (req, res) => {
             seenNames.add(norm);
             const regDoc = registeredMap.get(norm);
 
+            let rawContact = (regDoc ? regDoc.universityContact : '') || u.phone || '';
+            let rawEmail = (regDoc ? regDoc.universityEmail : '') || (regDoc ? regDoc.address : '') || u.address || '';
+
+            // Detect if contact contains '@' and email does not, or vice versa
+            if (rawContact.includes('@') && !rawEmail.includes('@')) {
+                const temp = rawContact;
+                rawContact = rawEmail;
+                rawEmail = temp;
+            } else if (rawContact.includes('@') && !rawEmail) {
+                rawEmail = rawContact;
+                rawContact = '';
+            }
+
+            if (/^[\d\s+\-()]{7,15}$/.test(rawEmail) && !/^[\d\s+\-()]{7,15}$/.test(rawContact)) {
+                const temp = rawContact;
+                rawContact = rawEmail;
+                rawEmail = temp;
+            }
+
             results.push({
                 _id: u._id,
                 isMaster: true,
                 universityName: u.name,
-                address: u.address || (regDoc ? regDoc.address : ''),
-                universityContact: u.phone || (regDoc ? regDoc.universityContact : ''),
+                address: rawEmail,
+                universityEmail: rawEmail,
+                universityContact: rawContact,
                 isExistingUniversity: Boolean(regDoc),
                 registrationId: regDoc ? regDoc._id : null,
                 players: regDoc ? (regDoc.players || []) : [],
@@ -254,12 +274,23 @@ exports.searchActiveUniversities = async (req, res) => {
             const norm = (r.universityName || '').toLowerCase().trim();
             if (!seenNames.has(norm)) {
                 seenNames.add(norm);
+
+                let rawContact = r.universityContact || '';
+                let rawEmail = r.universityEmail || r.address || '';
+
+                if (rawContact.includes('@') && !rawEmail.includes('@')) {
+                    const temp = rawContact;
+                    rawContact = rawEmail;
+                    rawEmail = temp;
+                }
+
                 results.push({
                     _id: r._id,
                     isMaster: false,
                     universityName: r.universityName,
-                    address: r.address || '',
-                    universityContact: r.universityContact || '',
+                    address: rawEmail,
+                    universityEmail: rawEmail,
+                    universityContact: rawContact,
                     isExistingUniversity: true,
                     registrationId: r._id,
                     players: r.players || [],
